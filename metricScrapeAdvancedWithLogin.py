@@ -1,32 +1,21 @@
 import re
-from bs4 import BeautifulSoup
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.firefox.service import Service
-from selenium.webdriver.firefox.options import Options
-import os
 import time
 
-def get_metrics(url):
+from bs4 import BeautifulSoup
+from selenium import webdriver
+from selenium.webdriver.firefox.service import Service
+from selenium.webdriver.firefox.options import Options
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions as EC
+import os
+
+def get_metrics_login(url):
     geckodriver_path = os.path.join(os.getcwd(), 'geckodriver.exe')
     service = Service(geckodriver_path)
     options = Options()
     #options.add_argument("--headless")
     driver = webdriver.Firefox(service=service, options=options)
-
-    def extract_count(metric_name: str) -> str:
-        data = soup.find(string=re.compile(metric_name))
-        if data:
-            parent = data.find_parent().find_parent().find_parent()
-            count_span = parent.find('div').find('span').find('span').find('span')
-            return count_span.text if count_span else 'Not found'
-        return 'Not found'
-
-    from selenium.webdriver.support.ui import WebDriverWait
-    from selenium.webdriver.common.by import By
-    from selenium.webdriver.support import expected_conditions as EC
 
     def login():
         try:
@@ -34,6 +23,7 @@ def get_metrics(url):
             login_button = WebDriverWait(driver, 10).until(
                 EC.element_to_be_clickable((By.XPATH, "//span[text()='Anmelden']"))
             )
+            time.sleep(1)
             login_button.click()
 
             # Locate and interact with email/username field
@@ -42,6 +32,7 @@ def get_metrics(url):
                     (By.XPATH, "//span[text()='Telefonnummer, E-Mail-Adresse oder Nutzername']"))
             )
             email_field = email_text.find_element(By.XPATH, "ancestor::*[4]")
+            time.sleep(1)
             email_field.click()
             driver.switch_to.active_element.send_keys("shapovalov@connected-organization.de")
 
@@ -74,8 +65,6 @@ def get_metrics(url):
                 EC.element_to_be_clickable((By.XPATH, "(//span[text()='Anmelden'])[2]/ancestor::*[3]"))
             )
             final_login_button.click()
-
-            print("Logged in successfully")
             return True
         except Exception as e:
             print("Login failed:", e)
@@ -86,31 +75,29 @@ def get_metrics(url):
         if not login():
             return False
 
-        time.sleep(20)
-        WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.XPATH, "/html/body/div[1]/div/div/div[2]/main/div/div/div/div[1]/div/section/div/div/div[1]/div/div/article/div/div/div[3]/div[5]/div[2]/a"))
+        WebDriverWait(driver, 10).until( #some path that checks if side is loaded
+            EC.presence_of_element_located((By.XPATH, "/html/body/div[1]/div/div/div[2]/main/div/div/div/div[1]/div/section/div/div/div[1]/div/div/article/div/div/div[3]/div[5]/div/div/div[1]/button/div/div[2]/span/span/span"))
         )
 
         html_content = driver.page_source
         soup = BeautifulSoup(html_content, 'html.parser')
 
-        repost_count = extract_count("Reposts")
-        print(f"Reposts: {repost_count}")
+        data = soup.find(attrs={"aria-label": re.compile(r"(\d+)\s*(replies|reposts|likes|bookmarks|views)")})
 
-        quote_count = extract_count("Zitate")
-        print(f"Quotes: {quote_count}")
+        if data:
+            data_text = data.get("aria-label")
+            pattern = r"(\d+)"
+            beautiful_data = re.findall(pattern, data_text)
+            beautiful_data = [int(num) for num in beautiful_data]
 
-        like_count = extract_count("Gefällt mir")
-        print(f"Likes: {like_count}")
+            reply_count = beautiful_data[0]
+            repost_count = beautiful_data[1]
+            like_count = beautiful_data[2]
+            bookmark_count = beautiful_data[3]
+            view_count = beautiful_data[4]
 
-        bookmarks_count = extract_count("Lesezeichen")
-        print(f"Bookmarks: {bookmarks_count}")
-
-        views_count = extract_count("Mal angezeigt")
-        print(f"Views: {views_count}")
-
+            return reply_count, repost_count, like_count, bookmark_count, view_count
+        else:
+            return None
     finally:
-        return
         driver.quit()
-
-get_metrics("https://x.com/BarackObama/status/1853617803829375120")
