@@ -82,22 +82,30 @@ def get_metrics_login(url):
         html_content = driver.page_source
         soup = BeautifulSoup(html_content, 'html.parser')
 
-        data = soup.find(attrs={"aria-label": re.compile(r"(\d+)\s*(replies|reposts|likes|bookmarks|views)")})
+        counts = {
+            "replies": 0,
+            "reposts": 0,
+            "likes": 0,
+            "bookmarks": 0,
+            "views": 0
+        }
+
+        data = soup.find(attrs={"aria-label": re.compile(r"replies|reposts|likes|bookmarks|views")})
 
         if data:
             data_text = data.get("aria-label")
-            pattern = r"(\d+)"
-            beautiful_data = re.findall(pattern, data_text)
-            beautiful_data = [int(num) for num in beautiful_data]
+            pattern = r"(\d+)\s*(replies|reposts|likes|bookmarks|views)"
+            matches = re.findall(pattern, data_text)
 
-            reply_count = beautiful_data[0]
-            repost_count = beautiful_data[1]
-            like_count = beautiful_data[2]
-            bookmark_count = beautiful_data[3]
-            view_count = beautiful_data[4]
+            for count, label in matches:
+                counts[label] = int(count)
 
-            return reply_count, repost_count, like_count, bookmark_count, view_count
-        else:
-            return None
+        reply_count = counts["replies"]
+        repost_count = counts["reposts"]
+        like_count = counts["likes"]
+        bookmark_count = counts["bookmarks"]
+        view_count = counts["views"]
+
+        return reply_count, repost_count, like_count, bookmark_count, view_count
     finally:
         driver.quit()

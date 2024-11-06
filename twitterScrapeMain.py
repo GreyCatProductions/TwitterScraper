@@ -42,9 +42,9 @@ def scrape_with_reply_count(url, minutes_passed):
 def hourly_scrape_with_reply_count(url: str, cycles: int, time_between_cycles: int):
     minutes_passed = 0
     while cycles > 0:
-        scrape_with_reply_count(url, minutes_passed)
         time.sleep(time_between_cycles)
+        scrape_with_reply_count(url, minutes_passed)
         minutes_passed += int(time_between_cycles / 60)
         cycles -= 1
 
-hourly_scrape_with_reply_count("https://x.com/alx/status/1854069364955414729", 5, 60)
+hourly_scrape_with_reply_count("https://x.com/TIME/status/1854146717249130998", 72, 3600)
