@@ -38,8 +38,9 @@ def hourly_scrape(urls: [str], cycles: int, time_between_cycles: int, all_layers
         options = Options()
         #options.add_argument("--headless")
         driver = webdriver.Firefox(service=service, options=options)
-        if not login(driver):
-            logging.error("Login failed")
+        driver.maximize_window()
+        #login needed
+        login(driver)
         #endregion
 
         start_date = datetime.now().strftime('%Y-%m-%d')
@@ -59,5 +60,5 @@ def hourly_scrape(urls: [str], cycles: int, time_between_cycles: int, all_layers
 
 
 hourly_scrape([
-    "https://x.com/TheFigen_/status/1854864984280334406", "https://x.com/gracieback2/status/1854786839028334886", "https://x.com/Travis_4_Trump/status/1854532605837787153"
-], 72, 600, False)
+    "https://x.com/Rothmus/status/1856221232326156359"
+], 1, 300, True)

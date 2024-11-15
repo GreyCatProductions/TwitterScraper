@@ -12,7 +12,10 @@ from commonMethods import extract_post_id, twitter_time_to_python_time, Tweet
 def login(driver):
     try:
         driver.get("https://x.com/home")
-        time.sleep(5)  # manually close firefox windows
+
+        time.sleep(1)
+        scroll_to_bottom(driver)
+
         # Wait for the page to load and locate the login button
         login_button = WebDriverWait(driver, 300).until(
             EC.element_to_be_clickable((By.XPATH, "//span[text()='Anmelden']"))
@@ -50,10 +53,11 @@ def login(driver):
         except:
             print("No unusual activity prompt detected")
 
+        time.sleep(1)
         # Enter password and complete login
-        WebDriverWait(driver, 300).until(
-            EC.presence_of_element_located((By.XPATH, "//span[text()='Passwort']"))
-        )
+        #WebDriverWait(driver, 300).until(
+        #    EC.presence_of_element_located((By.XPATH, "//span[text()='Passwort']"))
+        #)
         driver.switch_to.active_element.send_keys("Twitter48311!")
 
         time.sleep(1)
@@ -68,48 +72,45 @@ def login(driver):
         return False
 
 def get_metrics_login(url, driver, get_replies): #login before using this function needed
+    time.sleep(1)
     driver.get(url)
 
-    #scroll_to_bottom(driver)
+    WebDriverWait(driver, 300).until(
+        EC.element_to_be_clickable((By.XPATH, "//span[text()='Subscribe']")) #some element to make sure side is loaded
+    )
+    time.sleep(1)
 
-    time.sleep(5)
+    pattern = re.compile(r"replies|reposts|likes|bookmarks|views")
 
-    html_content = driver.page_source
-    soup = BeautifulSoup(html_content, 'html.parser')
+    og_post_data = get_main_metrics(driver, pattern)
 
-    data = soup.findAll(attrs={"aria-label": re.compile(r"replies|reposts|likes|bookmarks|views")})
-    time_stamps = soup.find_all('time', datetime=True) #time only works as long as their only occurences are on the posts
-
-    if len(data) != len(time_stamps):
-        print("data and time not synchrone!!!")
-
-    if data is None:
+    if not og_post_data:
         print("No data element found")
         return 0, 0, 0, 0, 0
 
-    post_data = data[0]
-    reply_count, repost_count, like_count, bookmark_count, view_count = get_metrics(post_data)
-    time_of_post = time_stamps[0].text
+    reply_count, repost_count, like_count, bookmark_count, view_count = get_metrics(og_post_data)
+    time_of_post = ""
     post_id = extract_post_id(url)
 
     og_tweet = Tweet(reply_count, repost_count, like_count, bookmark_count, view_count, "",
-                         time.time() - twitter_time_to_python_time(time_of_post) / 60)
+                         time.time() - twitter_time_to_python_time(time_of_post) / 60, url)
+
+    expected = reply_count
 
     replies = []
     #region replies
     if get_replies:
-        replies_data = data[1:]
-        time_stamps_data = time_stamps[1:]
-        for reply_data in replies_data:
-            time_text = "0"
-            reply_count, repost_count, like_count, bookmark_count, view_count = get_metrics(reply_data)
-            replies.append(Tweet(reply_count, repost_count, like_count, bookmark_count, view_count, post_id, "0"))
+        replies_raw = get_all(driver, pattern, int(reply_count * 0.8))
+        for reply_raw in replies_raw:
+            data = reply_raw.data
+            url = reply_raw.url
+            reply_count, repost_count, like_count, bookmark_count, view_count = get_metrics(data)
+            replies.append(Tweet(reply_count, repost_count, like_count, bookmark_count, view_count, post_id, "0", url))
     #endregion
-    print("replies found " + str(len(replies)))
+    print("replies: " + str(len(replies)) + " / " + str(expected))
     return og_tweet, replies
 
-def get_metrics(data):
-    data_text = data.get("aria-label")
+def get_metrics(data_text: str) -> tuple: #expects data.get('aria label'....)
     replies_match = re.search(r"(\d+)\s+replies", data_text)
     reposts_match = re.search(r"(\d+)\s+reposts", data_text)
     likes_match = re.search(r"(\d+)\s+likes", data_text)
@@ -131,13 +132,66 @@ def get_metrics(data):
     return reply_count, repost_count, like_count, bookmark_count, view_count
 
 
-def scroll_to_bottom(driver, scroll_pause_time=2):
-    last_height = driver.execute_script("return document.body.scrollHeight")
+def get_all(driver, pattern, replies_expected):
+    class Reply:
+        def __init__(self, url, data):
+            self.url = url
+            self.data = data
 
-    while True:
-        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-        time.sleep(scroll_pause_time)
-        new_height = driver.execute_script("return document.body.scrollHeight")
-        if new_height == last_height:
+        def __hash__(self):
+            return hash((self.url, self.data))
+
+        def __eq__(self, other):
+            return (self.url, self.data) == (other.url, other.data)
+
+    unique_replies = set()
+    seen_urls = set()  # Track seen URLs to ensure each URL occurs only once
+
+    while replies_expected > len(unique_replies):
+        print(f"Found {len(unique_replies)} / {replies_expected}")
+        driver.execute_script("window.scrollBy(0,300)", "")
+        time.sleep(0.5)
+        html = driver.page_source
+        soup = BeautifulSoup(html, "html.parser")
+
+        if soup.find(attrs={"span"}, text="Show probable spam"):
+            print("Found spam tag, ending.")
             break
-        last_height = new_height
+
+        found = set()
+        for element in soup.find_all(attrs={"aria-label": pattern, "role": "group"}):
+            try:
+                href_element = element.find("a", href=True)
+                if href_element:
+                    url = href_element['href']
+                    if url not in seen_urls:
+                        found.add(Reply(url, element.get("aria-label")))
+                        seen_urls.add(url)
+            except Exception as e:
+                print(f"Failed to process element: {e}")
+        unique_replies.update(found)
+
+    return list(unique_replies)
+
+
+def get_main_metrics(driver, pattern) -> str: #scrolls until it finds the first pattern. Needed for posts with big images
+    attempts = 0
+    max_attempts = 20
+
+    while attempts < max_attempts:
+        html = driver.page_source
+        soup = BeautifulSoup(html, "html.parser")
+        og_post_data = soup.find(attrs={"aria-label": pattern})
+
+        if og_post_data:
+            return og_post_data.get("aria-label")
+
+        driver.execute_script("window.scrollBy(0, 400);")
+        time.sleep(0.5)
+        attempts += 1
+
+    return None
+
+def scroll_to_bottom(driver):
+    driver.execute_script("window.scrollBy(0,500)", "")
+
