@@ -1,11 +1,10 @@
 import re
-import time
-
 from bs4 import BeautifulSoup
 from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
-
+from selenium.common.exceptions import NoSuchElementException
+from selenium.webdriver.common.by import By
+import time
 from commonMethods import extract_post_id, twitter_time_to_python_time, Tweet
 
 
@@ -75,9 +74,6 @@ def get_metrics_login(url, driver, get_replies): #login before using this functi
     time.sleep(1)
     driver.get(url)
 
-    WebDriverWait(driver, 300).until(
-        EC.element_to_be_clickable((By.XPATH, "//span[text()='Subscribe']")) #some element to make sure side is loaded
-    )
     time.sleep(1)
 
     pattern = re.compile(r"replies|reposts|likes|bookmarks|views")
@@ -100,7 +96,7 @@ def get_metrics_login(url, driver, get_replies): #login before using this functi
     replies = []
     #region replies
     if get_replies:
-        replies_raw = get_all(driver, pattern, int(reply_count * 0.8))
+        replies_raw = get_all_replies(driver, int(reply_count * 0.8))
         for reply_raw in replies_raw:
             data = reply_raw.data
             url = reply_raw.url
@@ -131,8 +127,14 @@ def get_metrics(data_text: str) -> tuple: #expects data.get('aria label'....)
         view_count = int(views_match.group(1))
     return reply_count, repost_count, like_count, bookmark_count, view_count
 
+def get_all_replies(driver, replies_expected): #issue here
+    def is_valid_reply(current_element):
+        try:
+            sibling = current_element.find_element(By.XPATH, "following-sibling::*")
+            return bool(sibling.find_elements(By.XPATH, "./*"))
+        except NoSuchElementException:
+            return True
 
-def get_all(driver, pattern, replies_expected):
     class Reply:
         def __init__(self, url, data):
             self.url = url
@@ -144,32 +146,51 @@ def get_all(driver, pattern, replies_expected):
         def __eq__(self, other):
             return (self.url, self.data) == (other.url, other.data)
 
+    posts_path = "/html/body/div[1]/div/div/div[2]/main/div/div/div/div[1]/div/section/div/div"
+    metrics_path = "./div[3]/div/div/article/div/div/div[2]/div[2]/div[3]/div/div"
+
     unique_replies = set()
-    seen_urls = set()  # Track seen URLs to ensure each URL occurs only once
+    seen_urls = set()
 
-    while replies_expected > len(unique_replies):
-        print(f"Found {len(unique_replies)} / {replies_expected}")
-        driver.execute_script("window.scrollBy(0,300)", "")
-        time.sleep(0.5)
-        html = driver.page_source
-        soup = BeautifulSoup(html, "html.parser")
+    while True: #shall continue until no more children load
+        #get all elements in the posts_path
+        #if first loop, remove the first post as it is the original
+        #go trough all elements
+        #check if element is a valid post
+        #extract the data and the url
+        #if no more elements, scroll down
+        #if still no more elements, exit
 
-        if soup.find(attrs={"span"}, text="Show probable spam"):
-            print("Found spam tag, ending.")
-            break
 
-        found = set()
-        for element in soup.find_all(attrs={"aria-label": pattern, "role": "group"}):
+
+        all_elements = driver.find_element(By.XPATH, posts_path + './*')
+        for current_element in all_elements:
             try:
-                href_element = element.find("a", href=True)
-                if href_element:
-                    url = href_element['href']
-                    if url not in seen_urls:
-                        found.add(Reply(url, element.get("aria-label")))
-                        seen_urls.add(url)
+                if not is_valid_reply(current_element):
+                    continue
+
+                metrics_element = current_element.find_element(By.XPATH, metrics_path)
+
+                href_element = metrics_element.find_element(By.XPATH, ".//a[@href]")
+                url = href_element.get_attribute("href")
+                data = metrics_element.get_attribute("aria-label")
+
+                if url and url not in seen_urls:
+                    unique_replies.add(Reply(url, data))
+                    seen_urls.add(url)
+                    print(f"Found reply: {url}")
+
+                while True:
+                    try:
+                        driver.find_element(By.XPATH, next_element_path)
+                        break
+                    except NoSuchElementException:
+                        driver.execute_script("window.scrollBy(0,500)")
+                        time.sleep(0.5)
+
+                print(f"Found {len(unique_replies)} / {replies_expected}")
             except Exception as e:
-                print(f"Failed to process element: {e}")
-        unique_replies.update(found)
+                print("failed: " + str(e))
 
     return list(unique_replies)
 
@@ -191,6 +212,7 @@ def get_main_metrics(driver, pattern) -> str: #scrolls until it finds the first 
         attempts += 1
 
     return None
+
 
 def scroll_to_bottom(driver):
     driver.execute_script("window.scrollBy(0,500)", "")
