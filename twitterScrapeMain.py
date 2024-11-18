@@ -62,5 +62,5 @@ def hourly_scrape(urls: [str], cycles: int, time_between_cycles: int, all_layers
 
 
 hourly_scrape([
-    "https://x.com/snicklink/status/1857459707524366386"
+    "https://x.com/ainyrockstar/status/1857835451807133970"
 ], 1, 3600, True)
