@@ -2,7 +2,6 @@ import re
 from bs4 import BeautifulSoup
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.common.by import By
 import time
 from commonMethods import extract_post_id, twitter_time_to_python_time, Tweet
@@ -95,13 +94,9 @@ def get_metrics_login(url, driver, get_replies): #login before using this functi
     replies = []
     #region replies
     if get_replies:
-        replies_raw = get_all_replies(driver)
-        print("replies: " + str(len(replies_raw)) + " / " + str(expected))
-        for reply_raw in replies_raw:
-            data = reply_raw.data
-            url = reply_raw.url
-            reply_count, repost_count, like_count, bookmark_count, view_count = get_metrics(data)
-            replies.append(Tweet(reply_count, repost_count, like_count, bookmark_count, view_count, post_id, "0", url))
+        click_sort_by_likes_button(driver) #makes twitter replies sorted by likes
+        time.sleep(5)
+        replies = get_all_replies(driver, og_tweet)
     #endregion
     return og_tweet, replies
 
@@ -126,66 +121,76 @@ def get_metrics(data_text: str) -> tuple: #expects data.get('aria label'....)
         view_count = int(views_match.group(1))
     return reply_count, repost_count, like_count, bookmark_count, view_count
 
-def get_all_replies(driver): #issue here
+def get_all_replies(driver, replies_to_tweet_id):
     def is_valid_reply(current_element):
-        try:
-            sibling = current_element.find_element(By.XPATH, "following-sibling::*")
-            return not bool(sibling.find_elements(By.XPATH, "./*/*"))
-        except NoSuchElementException:
-            return False
+        sibling = current_element.find_next_sibling()
+        if sibling:
+            first_child = sibling.contents[0] if sibling.contents else None
+            if first_child and hasattr(first_child, 'children'):
+                return not bool(list(first_child.children))
+        return True
 
     def is_spam_button(current_element):
         return "Show probable spam" in current_element.text
 
     class Reply:
-        def __init__(self, url, data):
-            self.url = url
+        def __init__(self, id, data):
+            self.id = id
             self.data = data
 
-        def __hash__(self):
-            return hash((self.url, self.data))
+    #path to parent of all posts
+    posts_path = "html > body > div:first-of-type > div > div > div:nth-of-type(2) > main > div > div > div > div:first-of-type > div > section > div > div"
 
-        def __eq__(self, other):
-            return (self.url, self.data) == (other.url, other.data)
-
-    posts_path = "/html/body/div[1]/div/div/div[2]/main/div/div/div/div[1]/div/section/div/div"
-    metrics_path = "./div/div/article/div/div/div[2]/div[2]/div[3]/div/div"
-    unique_replies = set()
-    seen_urls = set()
+    seen_ids = set()
+    unique_replies = []
 
     cycles_since_new_found = 0
-    while cycles_since_new_found < 5: #funktioniert. Für Geschwindigkeit in soup umwandeln
-        all_elements = driver.find_elements(By.XPATH, posts_path + '/*')
-        new_elements = set()
-        for i in range(0, len(all_elements)):
-            current_element_path = (posts_path + f'/div[{i + 1}]') #ist 1 indiziert
-            current_element = driver.find_element(By.XPATH, current_element_path)
+    while cycles_since_new_found < 5:
+        html_source = driver.page_source
+        soup = BeautifulSoup(html_source, 'html.parser')
+        posts_parent = soup.select_one(posts_path)
+
+        new_unique_replies_found = []
+
+        for current_element in posts_parent.find_all(recursive=False):
             try:
                 if is_spam_button(current_element):
                     print("spam button found, ending")
-                    break
+                    return unique_replies
                 if not is_valid_reply(current_element):
                     continue
 
-                metrics_element = current_element.find_element(By.XPATH, metrics_path)
-                href_element = metrics_element.find_element(By.XPATH, ".//a[@href]")
-                url = href_element.get_attribute("href")
-                if url not in seen_urls:
+                #path from post to its metrics
+                metrics_element = current_element.find('div').find('div').find('article').find('div').find('div').contents[1].contents[1].contents[-1].find().find()
+                #path from metrics_element to href with url
+                href_element = metrics_element.contents[3].find()
+                url = href_element.get('href')
+                id = url.split('/')[3]
+
+                if id not in seen_ids:
                     cycles_since_new_found = 0
-                    seen_urls.add(url)
-                    data = metrics_element.get_attribute("aria-label")
-                    new_elements.add(Reply(url, data))
-            except NoSuchElementException:
-                print("skipping first element")
-        if new_elements:
-            unique_replies.update(new_elements)
+                    seen_ids.add(id)
+                    data = metrics_element.get("aria-label")
+                    reply_count, repost_count, like_count, bookmark_count, view_count = get_metrics(data)
+                    new_unique_replies_found.append(
+                        Tweet(reply_count, repost_count, like_count, bookmark_count, view_count, replies_to_tweet_id, "0", id))
+
+                    if like_count == 0 and reply_count == 0 and repost_count == 0:
+                        print("reached posts with no interaction, ending")
+                        unique_replies.extend(new_unique_replies_found)
+                        return unique_replies
+            except Exception as e:
+                pass
+
+        if new_unique_replies_found:
+            unique_replies.extend(new_unique_replies_found)
             print("current replies: " + str(len(unique_replies)))
         else:
             cycles_since_new_found += 1
             print("no new found, scrolling")
-            scroll(driver, 1000)
+            scroll(driver, 2000)
             time.sleep(1)
-    return list(unique_replies)
+    return unique_replies
 
 def get_main_metrics(driver, pattern) -> str: #scrolls until it finds the first pattern. Needed for posts with big images
     attempts = 0
@@ -204,6 +209,30 @@ def get_main_metrics(driver, pattern) -> str: #scrolls until it finds the first 
         attempts += 1
 
     return None
+
+def click_sort_by_likes_button(driver):
+    def scroll_until_appears(driver, path_to_find):
+        while True:
+            try:
+                driver.find_element(By.XPATH, path_to_find)
+                break
+            except:
+                scroll(driver, 300)
+                time.sleep(1)
+
+    x_path_to_sort_button = "/html/body/div[1]/div/div/div[2]/main/div/div/div/div[1]/div/div[1]/div[1]/div/div/div/div/div/div[3]/div/button[2]"
+    scroll_until_appears(driver, x_path_to_sort_button) #needs to scroll a little until the option to sort appears
+    sort_button = WebDriverWait(driver, 10).until(
+        EC.element_to_be_clickable((By.XPATH, x_path_to_sort_button))
+    )
+    sort_button.click()
+
+    x_path_to_likes_sort_button = "/html/body/div[1]/div/div/div[1]/div[2]/div/div/div/div[2]/div/div[3]/div/div/div/div[4]"
+    likes_button = WebDriverWait(driver, 10).until(
+        EC.element_to_be_clickable((By.XPATH, x_path_to_likes_sort_button))
+    )
+    likes_button.click()
+    time.sleep(1)
 
 def scroll(driver, y_range):
     driver.execute_script(f"window.scrollBy(0,{y_range})", "")
