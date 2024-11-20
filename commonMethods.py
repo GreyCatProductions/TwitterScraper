@@ -29,13 +29,13 @@ def extract_count(soup: BeautifulSoup, metric_name: str) -> int:
 def extract_post_id(url: str) -> int:
     return int(urlparse(url).path.split('/')[-1])
 
-def save_to_csv_login(file_path_og_post, file_path_replies, og_tweet, replies):
-    def write_data(file_exists, tweets: [Tweet], file):
+def save_to_csv_login(tweets, path):
+    file_exists = os.path.isfile(path)
+    with open(path, mode='a', newline='', encoding='utf-8') as file:
         writer = csv.writer(file)
 
         if not file_exists:
-            writer.writerow(["time_since_upload",
-                             "post_url",
+            writer.writerow(["post_url",
                              "reply_count",
                              "repost_count",
                              "like_count",
@@ -45,20 +45,12 @@ def save_to_csv_login(file_path_og_post, file_path_replies, og_tweet, replies):
                              "spreading_rate %"])
 
         for tweet in tweets:
-            reply_count, repost_count, like_count, bookmark_count, view_count, reply_to_id, time_since_upload, url = tweet.get_stats()
+            reply_count, repost_count, like_count, bookmark_count, view_count, reply_to_id, url = tweet.get_stats()
+            spreading_rate = 0 if view_count == 0 else (reply_count + repost_count) / view_count * 100
             writer.writerow(
-                [time_since_upload, url, reply_count, repost_count, like_count, bookmark_count, view_count, reply_to_id, 0 if view_count == 0 else (reply_count + repost_count) / view_count * 100])
+                [url, reply_count, repost_count, like_count, bookmark_count, view_count, reply_to_id,
+                 spreading_rate])
 
-    file_exists_og_post = os.path.isfile(file_path_og_post)
-    file_exists_replies = os.path.isfile(file_path_replies)
-
-    try:
-        with open(file_path_og_post, mode='a', newline='', encoding='utf-8') as file_og_post, \
-             open(file_path_replies, mode='a', newline='', encoding='utf-8') as file_replies:
-            write_data(file_exists_og_post, [og_tweet], file_og_post)
-            write_data(file_exists_replies, replies, file_replies)
-    except OSError as e:
-        print(f"Error opening or writing to file: {e}")
 
 def twitter_time_to_python_time(datetime_str: str) -> float:
     try:
@@ -70,15 +62,14 @@ def twitter_time_to_python_time(datetime_str: str) -> float:
     return parsed_datetime.timestamp()
 
 class Tweet:
-    def __init__(self, reply_count, repost_count, like_count, bookmark_count, view_count, reply_to_id, time_since_upload, url):
+    def __init__(self, reply_count: int, repost_count: int, like_count: int, bookmark_count: int, view_count: int, reply_to_url: str, url: str):
         self.reply_count = reply_count
         self.repost_count = repost_count
         self.like_count = like_count
         self.bookmark_count = bookmark_count
         self.view_count = view_count
-        self.reply_to_id= reply_to_id
-        self.time_since_upload = time_since_upload
+        self.reply_to_id= reply_to_url
         self.url = url
 
     def get_stats(self):
-        return self.reply_count, self.repost_count, self.like_count, self.bookmark_count, self.view_count, self.reply_to_id, self.time_since_upload, self.url
+        return self.reply_count, self.repost_count, self.like_count, self.bookmark_count, self.view_count, self.reply_to_id, self.url

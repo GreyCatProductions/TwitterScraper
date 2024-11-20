@@ -69,7 +69,7 @@ def login(driver):
         print("Login failed:", e)
         return False
 
-def get_metrics_login(url, driver, get_replies): #login before using this function needed
+def get_metrics_login(url, driver): #login before using this function needed
     time.sleep(1)
     driver.get(url)
     time.sleep(1)
@@ -83,21 +83,12 @@ def get_metrics_login(url, driver, get_replies): #login before using this functi
         return 0, 0, 0, 0, 0
 
     reply_count, repost_count, like_count, bookmark_count, view_count = get_metrics(og_post_data)
-    time_of_post = ""
-    post_id = extract_post_id(url)
 
-    og_tweet = Tweet(reply_count, repost_count, like_count, bookmark_count, view_count, "",
-                         time.time() - twitter_time_to_python_time(time_of_post) / 60, url)
+    click_sort_by_likes_button(driver) #makes twitter replies sorted by likes
+    time.sleep(5)
+    replies = get_all_replies(driver, url)
 
-    expected = reply_count
-
-    replies = []
-    #region replies
-    if get_replies:
-        click_sort_by_likes_button(driver) #makes twitter replies sorted by likes
-        time.sleep(5)
-        replies = get_all_replies(driver, og_tweet)
-    #endregion
+    og_tweet = Tweet(reply_count, repost_count, like_count, bookmark_count, view_count, "", url)
     return og_tweet, replies
 
 def get_metrics(data_text: str) -> tuple: #expects data.get('aria label'....)
@@ -121,7 +112,7 @@ def get_metrics(data_text: str) -> tuple: #expects data.get('aria label'....)
         view_count = int(views_match.group(1))
     return reply_count, repost_count, like_count, bookmark_count, view_count
 
-def get_all_replies(driver, replies_to_tweet_id):
+def get_all_replies(driver, replies_to_url):
     def is_valid_reply(current_element):
         sibling = current_element.find_next_sibling()
         if sibling:
@@ -133,15 +124,10 @@ def get_all_replies(driver, replies_to_tweet_id):
     def is_spam_button(current_element):
         return "Show probable spam" in current_element.text
 
-    class Reply:
-        def __init__(self, id, data):
-            self.id = id
-            self.data = data
-
     #path to parent of all posts
     posts_path = "html > body > div:first-of-type > div > div > div:nth-of-type(2) > main > div > div > div > div:first-of-type > div > section > div > div"
 
-    seen_ids = set()
+    seen_url = set()
     unique_replies = []
 
     cycles_since_new_found = 0
@@ -164,16 +150,15 @@ def get_all_replies(driver, replies_to_tweet_id):
                 metrics_element = current_element.find('div').find('div').find('article').find('div').find('div').contents[1].contents[1].contents[-1].find().find()
                 #path from metrics_element to href with url
                 href_element = metrics_element.contents[3].find()
-                url = href_element.get('href')
-                id = url.split('/')[3]
+                url = "https://x.com" + '/'.join(href_element.get('href').split("/")[:-1])
 
-                if id not in seen_ids:
+                if url not in seen_url:
                     cycles_since_new_found = 0
-                    seen_ids.add(id)
+                    seen_url.add(url)
                     data = metrics_element.get("aria-label")
                     reply_count, repost_count, like_count, bookmark_count, view_count = get_metrics(data)
                     new_unique_replies_found.append(
-                        Tweet(reply_count, repost_count, like_count, bookmark_count, view_count, replies_to_tweet_id, "0", id))
+                        Tweet(reply_count, repost_count, like_count, bookmark_count, view_count, replies_to_url, url))
 
                     if like_count == 0 and reply_count == 0 and repost_count == 0:
                         print("reached posts with no interaction, ending")

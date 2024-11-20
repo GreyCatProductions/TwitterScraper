@@ -1,5 +1,5 @@
 import logging
-
+import pandas as pd
 from commonMethods import *
 from metricScrapeNoLogin import *
 from metricScrapeAdvancedWithLogin import *
@@ -13,24 +13,54 @@ logging.basicConfig(
 )
 #endregion
 
-def scrape_with_reply_count(urls, driver, all_layers, cycle):
+def scrape_with_reply_count(urls, driver, cycle):
     for url in urls:
         try:
             logging.info("Scraping metrics for URL: %s", url)
-            og_tweet, replies = get_metrics_login(url, driver, all_layers)
 
-            dir_path = os.path.join("data", str(extract_post_id(url)), datetime.now().strftime('%Y-%m-%d'))
-            replies_path = os.path.join(dir_path, str(cycle) + "h")
+            og_tweet, replies = get_metrics_login(url, driver)
+
+            dir_path = os.path.join("data", str(extract_post_id(url)), datetime.now().strftime('%Y-%m-%d'), str(cycle) + "h")
+
             os.makedirs(dir_path, exist_ok=True)
-            os.makedirs(replies_path, exist_ok=True)
             file_path_og_post = os.path.join(dir_path, "og_post.csv")
-            file_path_replies = os.path.join(replies_path, "replies.csv")
-            save_to_csv_login(file_path_og_post, file_path_replies, og_tweet, replies)
+            save_to_csv_login([og_tweet], file_path_og_post)
+
+            for reply in replies:
+                reply_dir = os.path.join(dir_path, str(extract_post_id(reply.url)))
+                os.makedirs(reply_dir, exist_ok=True)
+                reply_post = os.path.join(reply_dir, "reply.csv")
+                save_to_csv_login([reply], reply_post)
 
             logging.info("Done successfully")
 
         except Exception as e:
             logging.error("Error scraping metrics for URL: %s", url, exc_info=True)
+
+def scrape_replies_of_post(driver, path_of_post):
+    df = pd.read_csv(path_of_post)
+
+    post_url = ""
+    reply_count = ""
+
+    for index, row in df.iterrows():
+        post_url = row["post_url"]
+        reply_count = row["reply_count"]
+
+    if reply_count == 0:
+        return
+    time.sleep(1)
+    driver.get(post_url)
+    time.sleep(1)
+
+    replies = get_all_replies(driver, post_url)
+
+    for reply in replies:
+        reply_dir = os.path.join(path_of_post, str(extract_post_id(reply.url)))
+        os.makedirs(reply_dir, exist_ok=True)
+        reply_post = os.path.join(reply_dir, "reply.csv")
+        save_to_csv_login([reply], reply_post)
+
 
 def hourly_scrape(urls: [str], cycles: int, time_between_cycles: int, all_layers: bool):
     driver = None
@@ -51,7 +81,7 @@ def hourly_scrape(urls: [str], cycles: int, time_between_cycles: int, all_layers
         for cycle in range(cycles):
             logging.info("Cycle %d/%d starting", cycle + 1, cycles)
             scrape_start = time.time()
-            scrape_with_reply_count(urls, driver, all_layers, cycle)
+            scrape_with_reply_count(urls, driver, cycle)
             time_used_for_scraping = time.time() - scrape_start
 
             minutes_passed += int(time_between_cycles / 60)
