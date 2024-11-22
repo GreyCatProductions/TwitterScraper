@@ -23,8 +23,9 @@ def extract_count(soup: BeautifulSoup, metric_name: str) -> int:
                 count_value = int(re.sub(r"\D", "", count_text))
 
             return int(count_value)
-
-    return None
+    else:
+        print("FAILED TO GET DATA!")
+    return -1
 
 def extract_post_id(url: str) -> int:
     return int(urlparse(url).path.split('/')[-1])

@@ -82,10 +82,11 @@ def get_metrics_login(url, driver, seen_urls): #login before using this function
 
     reply_count, repost_count, like_count, bookmark_count, view_count = get_metrics(og_post_data)
 
+    print("Clicking sort by likes button")
     click_sort_by_likes_button(driver) #makes twitter replies sorted by likes
     time.sleep(5)
     seen_urls.add(url)
-    replies = get_all_replies(driver, url, seen_urls)
+    replies, seen_urls = get_all_replies(driver, url, seen_urls)
 
     og_tweet = Tweet(reply_count, repost_count, like_count, bookmark_count, view_count, "", url)
     return og_tweet, replies, seen_urls
@@ -111,7 +112,7 @@ def get_metrics(data_text: str) -> tuple: #expects data.get('aria label'....)
         view_count = int(views_match.group(1))
     return reply_count, repost_count, like_count, bookmark_count, view_count
 
-def get_all_replies(driver, replies_to_url, seen_urls):
+def get_all_replies(driver, replies_to_url, seen_urls) -> tuple:
     def is_valid_reply(current_element):
         sibling = current_element.find_previous_sibling()
         if sibling:
@@ -140,7 +141,7 @@ def get_all_replies(driver, replies_to_url, seen_urls):
             try:
                 if is_spam_button(current_element):
                     print("spam button found, ending")
-                    return unique_replies
+                    return unique_replies, seen_urls
                 if not is_valid_reply(current_element):
                     continue
 
@@ -156,13 +157,12 @@ def get_all_replies(driver, replies_to_url, seen_urls):
                     seen_urls.add(url)
                     data = metrics_element.get("aria-label")
                     reply_count, repost_count, like_count, bookmark_count, view_count = get_metrics(data)
-                    new_unique_replies_found.append(
-                        Tweet(reply_count, repost_count, like_count, bookmark_count, view_count, replies_to_url, url))
+                    new_unique_replies_found.append(Tweet(reply_count, repost_count, like_count, bookmark_count, view_count, replies_to_url, url))
 
                     if like_count == 0 and reply_count == 0 and repost_count == 0:
                         print("reached posts with no interaction, ending")
                         unique_replies.extend(new_unique_replies_found)
-                        return unique_replies
+                        return unique_replies, seen_urls
             except Exception as e:
                 print("Failed to get element" + str(e))
 

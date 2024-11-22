@@ -38,6 +38,7 @@ def scrape_with_reply_count(urls, driver, cycle):
 
     for url in urls:
         try:
+            logging.info("---------- SCRAPING: " + url + " -------------")
             seen_urls = set()
             dir_path = os.path.join(
                 "data",
@@ -83,5 +84,5 @@ def hourly_scrape(urls: [str], cycles: int, time_between_cycles: int, all_layers
 
 
 hourly_scrape([
-    "https://x.com/ainyrockstar/status/1859154754703663168"
+    "https://x.com/BRICSinfo/status/1859790766413054168", "https://x.com/elonmusk/status/1859824059464417372", "https://x.com/AHuxley1963/status/1859844687525445844", "https://x.com/justdana1818/status/1859578661860475016", "https://x.com/EndWokeness/status/1859818323598508425", "https://x.com/EndWokeness/status/1859679069677507061", "https://x.com/HeimatliebeDE/status/1859302620290220234"
 ], 1, 3600, True)
