@@ -1,6 +1,4 @@
 import logging
-import pandas as pd
-from commonMethods import *
 from metricScrapeNoLogin import *
 from metricScrapeAdvancedWithLogin import *
 
@@ -14,53 +12,46 @@ logging.basicConfig(
 #endregion
 
 def scrape_with_reply_count(urls, driver, cycle):
-    for url in urls:
+    def process_tweet_and_replies(url, dir_path, is_root, seen_urls):
         try:
             logging.info("Scraping metrics for URL: %s", url)
 
-            og_tweet, replies = get_metrics_login(url, driver)
+            og_tweet, replies, seen_urls = get_metrics_login(url, driver, seen_urls)
 
-            dir_path = os.path.join("data", str(extract_post_id(url)), datetime.now().strftime('%Y-%m-%d'), str(cycle) + "h")
-
-            os.makedirs(dir_path, exist_ok=True)
-            file_path_og_post = os.path.join(dir_path, "og_post.csv")
-            save_to_csv_login([og_tweet], file_path_og_post)
+            if is_root:
+                logging.info("root_post done: " + og_tweet.url)
+                file_path_og_post = os.path.join(dir_path, "og_post.csv")
+                save_to_csv_login([og_tweet], file_path_og_post)
 
             for reply in replies:
                 reply_dir = os.path.join(dir_path, str(extract_post_id(reply.url)))
                 os.makedirs(reply_dir, exist_ok=True)
-                reply_post = os.path.join(reply_dir, "reply.csv")
-                save_to_csv_login([reply], reply_post)
 
-            logging.info("Done successfully")
+                reply_post_path = os.path.join(reply_dir, "reply.csv")
+                save_to_csv_login([reply], reply_post_path)
+
+                if reply.reply_count > 0:
+                    process_tweet_and_replies(reply.url, reply_dir, False, seen_urls)
 
         except Exception as e:
             logging.error("Error scraping metrics for URL: %s", url, exc_info=True)
 
-def scrape_replies_of_post(driver, path_of_post):
-    df = pd.read_csv(path_of_post)
+    for url in urls:
+        try:
+            seen_urls = set()
+            dir_path = os.path.join(
+                "data",
+                str(extract_post_id(url)),
+                datetime.now().strftime('%Y-%m-%d'),
+                str(cycle) + "h"
+            )
+            os.makedirs(dir_path, exist_ok=True)
 
-    post_url = ""
-    reply_count = ""
+            process_tweet_and_replies(url, dir_path, True, seen_urls)
+            logging.info("Done successfully for URL: %s", url)
 
-    for index, row in df.iterrows():
-        post_url = row["post_url"]
-        reply_count = row["reply_count"]
-
-    if reply_count == 0:
-        return
-    time.sleep(1)
-    driver.get(post_url)
-    time.sleep(1)
-
-    replies = get_all_replies(driver, post_url)
-
-    for reply in replies:
-        reply_dir = os.path.join(path_of_post, str(extract_post_id(reply.url)))
-        os.makedirs(reply_dir, exist_ok=True)
-        reply_post = os.path.join(reply_dir, "reply.csv")
-        save_to_csv_login([reply], reply_post)
-
+        except Exception as e:
+            logging.error("Error processing URL: %s", url, exc_info=True)
 
 def hourly_scrape(urls: [str], cycles: int, time_between_cycles: int, all_layers: bool):
     driver = None
@@ -92,5 +83,5 @@ def hourly_scrape(urls: [str], cycles: int, time_between_cycles: int, all_layers
 
 
 hourly_scrape([
-    "https://x.com/ainyrockstar/status/1857835451807133970"
+    "https://x.com/ainyrockstar/status/1859154754703663168"
 ], 1, 3600, True)

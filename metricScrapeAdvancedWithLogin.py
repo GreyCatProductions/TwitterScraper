@@ -1,10 +1,8 @@
-import re
-from bs4 import BeautifulSoup
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
 import time
-from commonMethods import extract_post_id, twitter_time_to_python_time, Tweet
+from commonMethods import *
 
 
 def login(driver):
@@ -69,7 +67,7 @@ def login(driver):
         print("Login failed:", e)
         return False
 
-def get_metrics_login(url, driver): #login before using this function needed
+def get_metrics_login(url, driver, seen_urls): #login before using this function needed
     time.sleep(1)
     driver.get(url)
     time.sleep(1)
@@ -86,10 +84,11 @@ def get_metrics_login(url, driver): #login before using this function needed
 
     click_sort_by_likes_button(driver) #makes twitter replies sorted by likes
     time.sleep(5)
-    replies = get_all_replies(driver, url)
+    seen_urls.add(url)
+    replies = get_all_replies(driver, url, seen_urls)
 
     og_tweet = Tweet(reply_count, repost_count, like_count, bookmark_count, view_count, "", url)
-    return og_tweet, replies
+    return og_tweet, replies, seen_urls
 
 def get_metrics(data_text: str) -> tuple: #expects data.get('aria label'....)
     replies_match = re.search(r"(\d+)\s+replies", data_text)
@@ -112,9 +111,9 @@ def get_metrics(data_text: str) -> tuple: #expects data.get('aria label'....)
         view_count = int(views_match.group(1))
     return reply_count, repost_count, like_count, bookmark_count, view_count
 
-def get_all_replies(driver, replies_to_url):
+def get_all_replies(driver, replies_to_url, seen_urls):
     def is_valid_reply(current_element):
-        sibling = current_element.find_next_sibling()
+        sibling = current_element.find_previous_sibling()
         if sibling:
             first_child = sibling.contents[0] if sibling.contents else None
             if first_child and hasattr(first_child, 'children'):
@@ -127,7 +126,6 @@ def get_all_replies(driver, replies_to_url):
     #path to parent of all posts
     posts_path = "html > body > div:first-of-type > div > div > div:nth-of-type(2) > main > div > div > div > div:first-of-type > div > section > div > div"
 
-    seen_url = set()
     unique_replies = []
 
     cycles_since_new_found = 0
@@ -147,14 +145,15 @@ def get_all_replies(driver, replies_to_url):
                     continue
 
                 #path from post to its metrics
-                metrics_element = current_element.find('div').find('div').find('article').find('div').find('div').contents[1].contents[1].contents[-1].find().find()
+                metrics_element = current_element.find('div').find('div').find('article').find('div').find('div').contents[-1].contents[-1].contents[-1].find().find()
+
                 #path from metrics_element to href with url
                 href_element = metrics_element.contents[3].find()
                 url = "https://x.com" + '/'.join(href_element.get('href').split("/")[:-1])
 
-                if url not in seen_url:
+                if url not in seen_urls:
                     cycles_since_new_found = 0
-                    seen_url.add(url)
+                    seen_urls.add(url)
                     data = metrics_element.get("aria-label")
                     reply_count, repost_count, like_count, bookmark_count, view_count = get_metrics(data)
                     new_unique_replies_found.append(
@@ -165,7 +164,7 @@ def get_all_replies(driver, replies_to_url):
                         unique_replies.extend(new_unique_replies_found)
                         return unique_replies
             except Exception as e:
-                pass
+                print("Failed to get element" + str(e))
 
         if new_unique_replies_found:
             unique_replies.extend(new_unique_replies_found)
@@ -175,7 +174,7 @@ def get_all_replies(driver, replies_to_url):
             print("no new found, scrolling")
             scroll(driver, 2000)
             time.sleep(1)
-    return unique_replies
+    return unique_replies, seen_urls
 
 def get_main_metrics(driver, pattern) -> str: #scrolls until it finds the first pattern. Needed for posts with big images
     attempts = 0
