@@ -13,28 +13,38 @@ logging.basicConfig(
 
 def scrape_with_reply_count(urls, driver, cycle):
     def process_tweet_and_replies(url, dir_path, is_root, seen_urls):
-        try:
-            logging.info("Scraping metrics for URL: %s", url)
+        retries_left = 10 if is_root else 3
+        while retries_left > 0:
+            try:
+                logging.info("Scraping metrics for URL: %s", url)
 
-            og_tweet, replies, seen_urls = get_metrics_login(url, driver, seen_urls)
+                og_tweet, replies, seen_urls = get_metrics_login(url, driver, seen_urls, is_root)
 
-            if is_root:
-                logging.info("root_post done: " + og_tweet.url)
-                file_path_og_post = os.path.join(dir_path, "og_post.csv")
-                save_to_csv_login([og_tweet], file_path_og_post)
+                if og_tweet is None and replies is None:
+                    logging.info("URL: %s GOT LIKELY DELETED", url)
+                    return False
 
-            for reply in replies:
-                reply_dir = os.path.join(dir_path, str(extract_post_id(reply.url)))
-                os.makedirs(reply_dir, exist_ok=True)
+                if is_root:
+                    logging.info("root_post done: " + og_tweet.url)
+                    file_path_og_post = os.path.join(dir_path, "og_post.csv")
+                    save_to_csv_login([og_tweet], file_path_og_post)
 
-                reply_post_path = os.path.join(reply_dir, "reply.csv")
-                save_to_csv_login([reply], reply_post_path)
+                for reply in replies:
+                    reply_dir = os.path.join(dir_path, str(extract_post_id(reply.url)))
+                    os.makedirs(reply_dir, exist_ok=True)
 
-                if reply.reply_count > 0:
-                    process_tweet_and_replies(reply.url, reply_dir, False, seen_urls)
+                    reply_post_path = os.path.join(reply_dir, "reply.csv")
+                    save_to_csv_login([reply], reply_post_path)
 
-        except Exception as e:
-            logging.error("Error scraping metrics for URL: %s", url, exc_info=True)
+                    if reply.reply_count > 0:
+                        process_tweet_and_replies(reply.url, reply_dir, False, seen_urls)
+                return True
+            except Exception as e:
+                logging.error("Error scraping metrics for URL: %s", url, exc_info=True)
+                driver.refresh()
+                time.sleep(10)
+                retries_left -= 1
+        logging.info("Skipping URL: %s", url)
 
     for url in urls:
         try:
@@ -48,13 +58,15 @@ def scrape_with_reply_count(urls, driver, cycle):
             )
             os.makedirs(dir_path, exist_ok=True)
 
-            process_tweet_and_replies(url, dir_path, True, seen_urls)
-            logging.info("Done successfully for URL: %s", url)
+            if process_tweet_and_replies(url, dir_path, True, seen_urls):
+                logging.info("---------- Done successfully for URL: %s ----------", url)
+            else:
+                logging.info("---------- FAILED for URL: %s ----------", url)
 
         except Exception as e:
             logging.error("Error processing URL: %s", url, exc_info=True)
 
-def hourly_scrape(urls: [str], cycles: int, time_between_cycles: int, all_layers: bool):
+def hourly_scrape(url_holder, cycles, time_between_cycles):
     driver = None
     try:
         #region preparing the driver and logging in
@@ -72,17 +84,21 @@ def hourly_scrape(urls: [str], cycles: int, time_between_cycles: int, all_layers
 
         for cycle in range(cycles):
             logging.info("Cycle %d/%d starting", cycle + 1, cycles)
+            urls = load_urls_from_file(url_holder)
             scrape_start = time.time()
             scrape_with_reply_count(urls, driver, cycle)
             time_used_for_scraping = time.time() - scrape_start
 
             minutes_passed += int(time_between_cycles / 60)
 
-            time.sleep(time_between_cycles - time_used_for_scraping)
+            time.sleep(time_between_cycles - time_used_for_scraping - 60)
+            print("Next Cycle starting in 60 seconds. Do not work on urls_to_scrape!!!")
+            time.sleep(60)
     finally:
         driver.quit()
 
+def load_urls_from_file(filename):
+    with open(filename, 'r') as file:
+        return [line.strip() for line in file if line.strip()]
 
-hourly_scrape([
-    "https://x.com/BRICSinfo/status/1859790766413054168", "https://x.com/elonmusk/status/1859824059464417372", "https://x.com/AHuxley1963/status/1859844687525445844", "https://x.com/justdana1818/status/1859578661860475016", "https://x.com/EndWokeness/status/1859818323598508425", "https://x.com/EndWokeness/status/1859679069677507061", "https://x.com/HeimatliebeDE/status/1859302620290220234"
-], 1, 3600, True)
+hourly_scrape("urls_to_scrape", 24, 3600)

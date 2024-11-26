@@ -1,3 +1,4 @@
+from selenium.common import NoSuchElementException
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
@@ -67,28 +68,40 @@ def login(driver):
         print("Login failed:", e)
         return False
 
-def get_metrics_login(url, driver, seen_urls): #login before using this function needed
+def get_metrics_login(url, driver, seen_urls, og_post_needed): #login before using this function needed
     time.sleep(1)
     driver.get(url)
     time.sleep(1)
+    print("Scraping: " + str(url))
+    try:
+        WebDriverWait(driver, 5).until(
+            EC.element_to_be_clickable((By.XPATH, "//span[text()='Hmm...this page doesn’t exist. Try searching for something else.]")))
+        return None, None, seen_urls
+    except Exception:
+        pass
 
-    pattern = re.compile(r"replies|reposts|likes|bookmarks|views")
+    og_tweet = None
 
-    og_post_data = get_main_metrics(driver, pattern)
+    if og_post_needed:
+        pattern = re.compile(r"replies|reposts|likes|bookmarks|views")
+        og_post_data = get_main_metrics(driver, pattern)
 
-    if not og_post_data:
-        print("No data element found")
-        return 0, 0, 0, 0, 0
+        if not og_post_data:
+            print("FAILED TO GET DATA + " + url)
+            return None, None, seen_urls
 
-    reply_count, repost_count, like_count, bookmark_count, view_count = get_metrics(og_post_data)
+        reply_count, repost_count, like_count, bookmark_count, view_count = get_metrics(og_post_data)
+        og_tweet = Tweet(reply_count, repost_count, like_count, bookmark_count, view_count, "", url)
 
-    print("Clicking sort by likes button")
-    click_sort_by_likes_button(driver) #makes twitter replies sorted by likes
-    time.sleep(5)
+    if og_post_needed:
+        sorting_successfull = click_sort_by_likes_button(driver) #makes twitter replies sorted by likes,
+        if not sorting_successfull:
+            print("FAILED TO SORT REPLIES!!!")
+            return None, None, seen_urls
+
     seen_urls.add(url)
-    replies, seen_urls = get_all_replies(driver, url, seen_urls)
+    replies, seen_urls = get_all_replies(driver, url, seen_urls, og_post_needed)
 
-    og_tweet = Tweet(reply_count, repost_count, like_count, bookmark_count, view_count, "", url)
     return og_tweet, replies, seen_urls
 
 def get_metrics(data_text: str) -> tuple: #expects data.get('aria label'....)
@@ -112,7 +125,7 @@ def get_metrics(data_text: str) -> tuple: #expects data.get('aria label'....)
         view_count = int(views_match.group(1))
     return reply_count, repost_count, like_count, bookmark_count, view_count
 
-def get_all_replies(driver, replies_to_url, seen_urls) -> tuple:
+def get_all_replies(driver, replies_to_url, seen_urls, replies_sorted) -> tuple:
     def is_valid_reply(current_element):
         sibling = current_element.find_previous_sibling()
         if sibling:
@@ -122,10 +135,15 @@ def get_all_replies(driver, replies_to_url, seen_urls) -> tuple:
         return True
 
     def is_spam_button(current_element):
-        return "Show probable spam" in current_element.text
+        try:
+            element = current_element.find().find().find()
+            if element and element.name == "button":
+                return "Show probable spam" in element.text
+            else:
+                return False
+        except:
+            return False
 
-    #path to parent of all posts
-    posts_path = "html > body > div:first-of-type > div > div > div:nth-of-type(2) > main > div > div > div > div:first-of-type > div > section > div > div"
 
     unique_replies = []
 
@@ -133,14 +151,16 @@ def get_all_replies(driver, replies_to_url, seen_urls) -> tuple:
     while cycles_since_new_found < 5:
         html_source = driver.page_source
         soup = BeautifulSoup(html_source, 'html.parser')
-        posts_parent = soup.select_one(posts_path)
+        posts_parent = soup.find(attrs={"aria-label": "Timeline: Conversation"}).find()
 
         new_unique_replies_found = []
 
         for current_element in posts_parent.find_all(recursive=False):
             try:
                 if is_spam_button(current_element):
-                    print("spam button found, ending")
+                    print("spam button reached, ending")
+                    unique_replies.extend(new_unique_replies_found)
+                    print("found replies: " + str(len(unique_replies)))
                     return unique_replies, seen_urls
                 if not is_valid_reply(current_element):
                     continue
@@ -157,14 +177,17 @@ def get_all_replies(driver, replies_to_url, seen_urls) -> tuple:
                     seen_urls.add(url)
                     data = metrics_element.get("aria-label")
                     reply_count, repost_count, like_count, bookmark_count, view_count = get_metrics(data)
-                    new_unique_replies_found.append(Tweet(reply_count, repost_count, like_count, bookmark_count, view_count, replies_to_url, url))
 
-                    if like_count == 0 and reply_count == 0 and repost_count == 0:
+                    if not (reply_count == 0 and repost_count == 0):
+                        new_unique_replies_found.append(Tweet(reply_count, repost_count, like_count, bookmark_count, view_count, replies_to_url, url))
+
+                    if replies_sorted and like_count < 3 and reply_count == 0 and repost_count == 0:
                         print("reached posts with no interaction, ending")
                         unique_replies.extend(new_unique_replies_found)
+                        print("found replies: " + str(len(unique_replies)))
                         return unique_replies, seen_urls
             except Exception as e:
-                print("Failed to get element" + str(e))
+                pass
 
         if new_unique_replies_found:
             unique_replies.extend(new_unique_replies_found)
@@ -174,6 +197,8 @@ def get_all_replies(driver, replies_to_url, seen_urls) -> tuple:
             print("no new found, scrolling")
             scroll(driver, 2000)
             time.sleep(1)
+    print("no new found in 5 cycles. Ending")
+    print("found replies: " + str(len(unique_replies)))
     return unique_replies, seen_urls
 
 def get_main_metrics(driver, pattern) -> str: #scrolls until it finds the first pattern. Needed for posts with big images
@@ -195,28 +220,36 @@ def get_main_metrics(driver, pattern) -> str: #scrolls until it finds the first 
     return None
 
 def click_sort_by_likes_button(driver):
-    def scroll_until_appears(driver, path_to_find):
-        while True:
+    def scroll_until_appears():
+        tries = 10
+
+        while tries > 0:
             try:
-                driver.find_element(By.XPATH, path_to_find)
-                break
+                button = driver.find_element(By.XPATH, '//button[@aria-label="Reply"]')
+                sort_button = button.find_element(By.XPATH, './following-sibling::*[1]')
+                return sort_button
             except:
-                scroll(driver, 300)
+                scroll(driver, 400)
+                tries -= 1
                 time.sleep(1)
+    tries = 3
+    while tries > 0:
+        try:
+            sort_button = scroll_until_appears()
+            sort_button.click()
 
-    x_path_to_sort_button = "/html/body/div[1]/div/div/div[2]/main/div/div/div/div[1]/div/div[1]/div[1]/div/div/div/div/div/div[3]/div/button[2]"
-    scroll_until_appears(driver, x_path_to_sort_button) #needs to scroll a little until the option to sort appears
-    sort_button = WebDriverWait(driver, 10).until(
-        EC.element_to_be_clickable((By.XPATH, x_path_to_sort_button))
-    )
-    sort_button.click()
+            likes_button = WebDriverWait(driver, 10).until(
+                    EC.element_to_be_clickable((By.XPATH, "//span[text()='Likes']"))
+            )
+            likes_button.click()
+            time.sleep(1)
+            return True
+        except Exception:
+            tries -= 1
+            driver.refresh()
+            print("Sort failed, refreshing and waiting a minute")
+            time.sleep(60)
 
-    x_path_to_likes_sort_button = "/html/body/div[1]/div/div/div[1]/div[2]/div/div/div/div[2]/div/div[3]/div/div/div/div[4]"
-    likes_button = WebDriverWait(driver, 10).until(
-        EC.element_to_be_clickable((By.XPATH, x_path_to_likes_sort_button))
-    )
-    likes_button.click()
-    time.sleep(1)
 
 def scroll(driver, y_range):
     driver.execute_script(f"window.scrollBy(0,{y_range})", "")
