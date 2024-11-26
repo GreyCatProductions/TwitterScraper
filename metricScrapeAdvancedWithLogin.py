@@ -74,11 +74,23 @@ def get_metrics_login(url, driver, seen_urls, og_post_needed): #login before usi
     time.sleep(1)
     print("Scraping: " + str(url))
     try:
-        WebDriverWait(driver, 5).until(
+        WebDriverWait(driver, 2).until(
             EC.element_to_be_clickable((By.XPATH, "//span[text()='Hmm...this page doesn’t exist. Try searching for something else.]")))
         return None, None, seen_urls
     except Exception:
         pass
+
+    retries = 5
+    request_block = True
+    while retries > 0 and request_block:
+        try:
+            WebDriverWait(driver, 2 ).until(EC.element_to_be_clickable((By.XPATH, "//span[text()='Something went wrong. Try reloading.]")))
+            print("Cant load. Requests probably blocked. Retrying in 30 seconds")
+            time.sleep(30)
+            driver.refresh()
+            retries -= 1
+        except Exception:
+            request_block = False
 
     og_tweet = None
 
