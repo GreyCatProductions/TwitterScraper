@@ -1,4 +1,3 @@
-from selenium.common import NoSuchElementException
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
@@ -75,7 +74,7 @@ def get_metrics_login(url, driver, seen_urls, og_post_needed): #login before usi
     print("Scraping: " + str(url))
     try:
         WebDriverWait(driver, 2).until(
-            EC.element_to_be_clickable((By.XPATH, "//span[text()='Hmm...this page doesn’t exist. Try searching for something else.]")))
+            EC.element_to_be_clickable((By.XPATH, "//span[text()='Hmm...this page doesn’t exist. Try searching for something else.']")))
         return None, None, seen_urls
     except Exception:
         pass
@@ -84,7 +83,7 @@ def get_metrics_login(url, driver, seen_urls, og_post_needed): #login before usi
     request_block = True
     while retries > 0 and request_block:
         try:
-            WebDriverWait(driver, 2 ).until(EC.element_to_be_clickable((By.XPATH, "//span[text()='Something went wrong. Try reloading.]")))
+            WebDriverWait(driver, 2 ).until(EC.element_to_be_clickable((By.XPATH, "//span[text()='Something went wrong. Try reloading.']")))
             print("Cant load. Requests probably blocked. Retrying in 30 seconds")
             time.sleep(30)
             driver.refresh()
@@ -103,7 +102,8 @@ def get_metrics_login(url, driver, seen_urls, og_post_needed): #login before usi
             return None, None, seen_urls
 
         reply_count, repost_count, like_count, bookmark_count, view_count = get_metrics(og_post_data)
-        og_tweet = Tweet(reply_count, repost_count, like_count, bookmark_count, view_count, "", url)
+        time_stamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        og_tweet = Tweet(reply_count, repost_count, like_count, bookmark_count, view_count, "", url, time_stamp)
 
     if og_post_needed:
         sorting_successfull = click_sort_by_likes_button(driver) #makes twitter replies sorted by likes,
@@ -143,7 +143,7 @@ def get_all_replies(driver, replies_to_url, seen_urls, replies_sorted) -> tuple:
         if sibling:
             first_child = sibling.contents[0] if sibling.contents else None
             if first_child and hasattr(first_child, 'children'):
-                return not bool(list(first_child.children))
+                return not any(list(first_child.children))
         return True
 
     def is_spam_button(current_element):
@@ -156,6 +156,26 @@ def get_all_replies(driver, replies_to_url, seen_urls, replies_sorted) -> tuple:
         except:
             return False
 
+    def is_last_element(current_element):
+        try:
+            if len(current_element.contents) == 1:
+                child = current_element.find()
+                if child and len(child.contents) == 1:
+                    inner_child = child.find()
+                    if inner_child and len(inner_child.contents) == 0:
+                        return True
+            return False
+        except:
+            return False
+
+    def is_additional_replies_button(current_element):
+        try:
+            text_element = current_element.find().find().find().find().find().contents[1].find().find().find().find().find()
+            if "Show additional replies, including those that may contain offensive content" in text_element.text and text_element.name == "span":
+                return True
+            return False
+        except:
+            return False
 
     unique_replies = []
 
@@ -174,6 +194,19 @@ def get_all_replies(driver, replies_to_url, seen_urls, replies_sorted) -> tuple:
                     unique_replies.extend(new_unique_replies_found)
                     print("found replies: " + str(len(unique_replies)))
                     return unique_replies, seen_urls
+
+                if is_additional_replies_button(current_element):
+                    print("additional replies button reached, ending")
+                    unique_replies.extend(new_unique_replies_found)
+                    print("found replies: " + str(len(unique_replies)))
+                    return unique_replies, seen_urls
+
+                if is_last_element(current_element):
+                    print("last element reached, ending")
+                    unique_replies.extend(new_unique_replies_found)
+                    print("found replies: " + str(len(unique_replies)))
+                    return unique_replies, seen_urls
+
                 if not is_valid_reply(current_element):
                     continue
 
@@ -189,9 +222,10 @@ def get_all_replies(driver, replies_to_url, seen_urls, replies_sorted) -> tuple:
                     seen_urls.add(url)
                     data = metrics_element.get("aria-label")
                     reply_count, repost_count, like_count, bookmark_count, view_count = get_metrics(data)
+                    time_stamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
                     if not (reply_count == 0 and repost_count == 0):
-                        new_unique_replies_found.append(Tweet(reply_count, repost_count, like_count, bookmark_count, view_count, replies_to_url, url))
+                        new_unique_replies_found.append(Tweet(reply_count, repost_count, like_count, bookmark_count, view_count, replies_to_url, url, time_stamp))
 
                     if replies_sorted and like_count < 3 and reply_count == 0 and repost_count == 0:
                         print("reached posts with no interaction, ending")

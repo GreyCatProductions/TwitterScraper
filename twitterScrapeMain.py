@@ -11,8 +11,8 @@ logging.basicConfig(
 )
 #endregion
 
-def scrape_with_reply_count(urls, driver, cycle):
-    def process_tweet_and_replies(url, dir_path, is_root, seen_urls):
+def scrape(urls, driver, cycle):
+    def process_tweet_and_replies(url, is_root, seen_urls, extendable_path):
         retries_left = 10 if is_root else 3
         while retries_left > 0:
             try:
@@ -24,41 +24,37 @@ def scrape_with_reply_count(urls, driver, cycle):
                     logging.info("URL: %s GOT LIKELY DELETED", url)
                     return False
 
+                total_csv_path = os.path.join(dir_path, "total.csv")
+                save_to_csv_login(replies, total_csv_path)
+
                 if is_root:
                     logging.info("root_post done: " + og_tweet.url)
                     file_path_og_post = os.path.join(dir_path, "og_post.csv")
                     save_to_csv_login([og_tweet], file_path_og_post)
 
                 for reply in replies:
-                    reply_dir = os.path.join(dir_path, str(extract_post_id(reply.url)))
+                    reply_dir = os.path.join(extendable_path, str(extract_post_id(reply.url)))
                     os.makedirs(reply_dir, exist_ok=True)
-
                     reply_post_path = os.path.join(reply_dir, "reply.csv")
                     save_to_csv_login([reply], reply_post_path)
 
                     if reply.reply_count > 0:
-                        process_tweet_and_replies(reply.url, reply_dir, False, seen_urls)
+                        process_tweet_and_replies(reply.url, False, seen_urls, reply_dir)
                 return True
             except Exception as e:
                 logging.error("Error scraping metrics for URL: %s", url, exc_info=True)
                 driver.refresh()
                 time.sleep(10)
                 retries_left -= 1
-        logging.info("Skipping URL: %s", url)
+        return False
 
     for url in urls:
         try:
             logging.info("---------- SCRAPING: " + url + " -------------")
             seen_urls = set()
-            dir_path = os.path.join(
-                "data",
-                str(extract_post_id(url)),
-                datetime.now().strftime('%Y-%m-%d'),
-                str(cycle) + "h"
-            )
+            dir_path = os.path.join("data", str(extract_post_id(url)), str(cycle) + "h")
             os.makedirs(dir_path, exist_ok=True)
-
-            if process_tweet_and_replies(url, dir_path, True, seen_urls):
+            if process_tweet_and_replies(url,True, seen_urls, dir_path):
                 logging.info("---------- Done successfully for URL: %s ----------", url)
             else:
                 logging.info("---------- FAILED for URL: %s ----------", url)
@@ -86,7 +82,7 @@ def hourly_scrape(url_holder, cycles, time_between_cycles):
             logging.info("Cycle %d/%d starting", cycle + 1, cycles)
             urls = load_urls_from_file(url_holder)
             scrape_start = time.time()
-            scrape_with_reply_count(urls, driver, cycle)
+            scrape(urls, driver, cycle)
             time_used_for_scraping = time.time() - scrape_start
 
             minutes_passed += int(time_between_cycles / 60)
