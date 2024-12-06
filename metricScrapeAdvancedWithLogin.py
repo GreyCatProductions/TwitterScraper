@@ -6,66 +6,61 @@ from commonMethods import *
 
 
 def login(driver):
+    driver.get("https://x.com/home")
+
+    time.sleep(1)
+    scroll(driver, 500)
+
+    # Wait for the page to load and locate the login button
+    login_button = WebDriverWait(driver, 300).until(
+        EC.element_to_be_clickable((By.XPATH, "//span[text()='Anmelden']"))
+    )
+    time.sleep(1)
+    login_button.click()
+
+    # Locate and interact with email/username field
+    email_text = WebDriverWait(driver, 300).until(
+        EC.presence_of_element_located(
+            (By.XPATH, "//span[text()='Telefonnummer, E-Mail-Adresse oder Nutzername']"))
+    )
+    email_field = email_text.find_element(By.XPATH, "ancestor::*[4]")
+    time.sleep(1)
+    email_field.click()
+    driver.switch_to.active_element.send_keys("shapovalov@connected-organization.de")
+
+    # Click "Weiter" to proceed
+    next_button = WebDriverWait(driver, 300).until(
+        EC.element_to_be_clickable((By.XPATH, "//span[text()='Weiter']/ancestor::*[2]"))
+    )
+    next_button.click()
+
+    # Handle unusual activity prompt if it appears
     try:
-        driver.get("https://x.com/home")
-
-        time.sleep(1)
-        scroll(driver, 500)
-
-        # Wait for the page to load and locate the login button
-        login_button = WebDriverWait(driver, 300).until(
-            EC.element_to_be_clickable((By.XPATH, "//span[text()='Anmelden']"))
-        )
-        time.sleep(1)
-        login_button.click()
-
-        # Locate and interact with email/username field
-        email_text = WebDriverWait(driver, 300).until(
+        unusual_activity = WebDriverWait(driver, 5).until(
             EC.presence_of_element_located(
-                (By.XPATH, "//span[text()='Telefonnummer, E-Mail-Adresse oder Nutzername']"))
+                (By.XPATH, "//span[contains(text(), 'ungewöhnliche Anmeldeaktivität')]"))
         )
-        email_field = email_text.find_element(By.XPATH, "ancestor::*[4]")
-        time.sleep(1)
-        email_field.click()
-        driver.switch_to.active_element.send_keys("shapovalov@connected-organization.de")
-
-        # Click "Weiter" to proceed
-        next_button = WebDriverWait(driver, 300).until(
+        driver.switch_to.active_element.send_keys("OlegShap05")
+        next_button = WebDriverWait(driver, 5).until(
             EC.element_to_be_clickable((By.XPATH, "//span[text()='Weiter']/ancestor::*[2]"))
         )
         next_button.click()
+    except:
+        pass
 
-        # Handle unusual activity prompt if it appears
-        try:
-            unusual_activity = WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located(
-                    (By.XPATH, "//span[contains(text(), 'ungewöhnliche Anmeldeaktivität')]"))
-            )
-            driver.switch_to.active_element.send_keys("OlegShap05")
-            next_button = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.XPATH, "//span[text()='Weiter']/ancestor::*[2]"))
-            )
-            next_button.click()
-        except:
-            print("No unusual activity prompt detected")
+    time.sleep(1)
+    # Enter password and complete login
+    #WebDriverWait(driver, 300).until(
+    #    EC.presence_of_element_located((By.XPATH, "//span[text()='Passwort']"))
+    #)
+    driver.switch_to.active_element.send_keys("Twitter48311!")
 
-        time.sleep(1)
-        # Enter password and complete login
-        #WebDriverWait(driver, 300).until(
-        #    EC.presence_of_element_located((By.XPATH, "//span[text()='Passwort']"))
-        #)
-        driver.switch_to.active_element.send_keys("Twitter48311!")
-
-        time.sleep(1)
-        final_login_button = WebDriverWait(driver, 300).until(
-            EC.element_to_be_clickable((By.XPATH, "(//span[text()='Anmelden'])/ancestor::*[3]"))
-        )
-        final_login_button.click()
-        time.sleep(3)
-        return True
-    except Exception as e:
-        print("Login failed:", e)
-        return False
+    time.sleep(1)
+    final_login_button = WebDriverWait(driver, 300).until(
+        EC.element_to_be_clickable((By.XPATH, "(//span[text()='Anmelden'])/ancestor::*[3]"))
+    )
+    final_login_button.click()
+    time.sleep(3)
 
 def get_metrics_login(url, driver, seen_urls, og_post_needed): #login before using this function needed
     time.sleep(1)
@@ -105,7 +100,6 @@ def get_metrics_login(url, driver, seen_urls, og_post_needed): #login before usi
         time_stamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         og_tweet = Tweet(reply_count, repost_count, like_count, bookmark_count, view_count, "", url, time_stamp)
 
-    if og_post_needed:
         sorting_successfull = click_sort_by_likes_button(driver) #makes twitter replies sorted by likes,
         if not sorting_successfull:
             print("FAILED TO SORT REPLIES!!!")
@@ -156,13 +150,20 @@ def get_all_replies(driver, replies_to_url, seen_urls, replies_sorted) -> tuple:
         except:
             return False
 
-    def is_last_element(current_element):
+    def is_last_element(current_element): #funktioniert nicht richtig, beim dynamischen Laden sieht der letzte Platzhalter identisch zum wirklichen letzten Element aus
+        return False
         try:
-            if len(current_element.contents) == 1:
+            next_sibling = current_element.find_next_sibling()
+
+            if not next_sibling and len(current_element.contents) == 1:
                 child = current_element.find()
                 if child and len(child.contents) == 1:
                     inner_child = child.find()
                     if inner_child and len(inner_child.contents) == 0:
+                        print(current_element.prettify())
+                        print("----")
+                        for post in posts_parent.find_all(recursive=False):
+                            print(post.prettify())
                         return True
             return False
         except:
@@ -224,7 +225,7 @@ def get_all_replies(driver, replies_to_url, seen_urls, replies_sorted) -> tuple:
                     reply_count, repost_count, like_count, bookmark_count, view_count = get_metrics(data)
                     time_stamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-                    if not (reply_count == 0 and repost_count == 0):
+                    if not (reply_count == 0):
                         new_unique_replies_found.append(Tweet(reply_count, repost_count, like_count, bookmark_count, view_count, replies_to_url, url, time_stamp))
 
                     if replies_sorted and like_count < 3 and reply_count == 0 and repost_count == 0:
@@ -241,7 +242,10 @@ def get_all_replies(driver, replies_to_url, seen_urls, replies_sorted) -> tuple:
         else:
             cycles_since_new_found += 1
             print("no new found, scrolling")
-            scroll(driver, 2000)
+            if not scroll(driver, 2000):
+                print("scrolling further impossible, ending")
+                return unique_replies, seen_urls
+
             time.sleep(1)
     print("no new found in 5 cycles. Ending")
     print("found replies: " + str(len(unique_replies)))
@@ -296,7 +300,13 @@ def click_sort_by_likes_button(driver):
             print("Sort failed, refreshing and waiting a minute")
             time.sleep(60)
 
-
 def scroll(driver, y_range):
-    driver.execute_script(f"window.scrollBy(0,{y_range})", "")
+    current_scroll = driver.execute_script("return window.scrollY;")
+    max_scroll = driver.execute_script("return document.body.scrollHeight - window.innerHeight;")
+
+    driver.execute_script(f"window.scrollBy(0, {y_range})")
+
+    new_scroll = driver.execute_script("return window.scrollY;")
+
+    return new_scroll > current_scroll or current_scroll < max_scroll
 

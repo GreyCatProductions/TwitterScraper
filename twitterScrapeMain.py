@@ -1,6 +1,7 @@
 import logging
 from metricScrapeNoLogin import *
 from metricScrapeAdvancedWithLogin import *
+from concurrent.futures import ThreadPoolExecutor
 
 #region logging
 logging.basicConfig(
@@ -12,86 +13,119 @@ logging.basicConfig(
 #endregion
 
 def scrape(urls, driver, cycle):
-    def process_tweet_and_replies(url, is_root, seen_urls, extendable_path):
+    def process_tweet_and_replies(url, is_root, seen_urls, extendable_path, depth=0):
         retries_left = 10 if is_root else 3
+
         while retries_left > 0:
             try:
-                logging.info("Scraping metrics for URL: %s", url)
-
+                total_replies_found = 0
                 og_tweet, replies, seen_urls = get_metrics_login(url, driver, seen_urls, is_root)
 
                 if og_tweet is None and replies is None:
-                    logging.info("URL: %s GOT LIKELY DELETED", url)
-                    return False
+                    return -1, -1
 
                 total_csv_path = os.path.join(dir_path, "total.csv")
                 save_to_csv_login(replies, total_csv_path)
 
                 if is_root:
-                    logging.info("root_post done: " + og_tweet.url)
+                    total_replies_found += og_tweet.reply_count
                     file_path_og_post = os.path.join(dir_path, "og_post.csv")
                     save_to_csv_login([og_tweet], file_path_og_post)
 
-                for reply in replies:
+                replies_found_with_spread = len(replies)
+
+                for i, reply in enumerate(replies):
                     reply_dir = os.path.join(extendable_path, str(extract_post_id(reply.url)))
                     os.makedirs(reply_dir, exist_ok=True)
                     reply_post_path = os.path.join(reply_dir, "reply.csv")
                     save_to_csv_login([reply], reply_post_path)
 
+                    if is_root and i % 5 == 0 and i != 0:
+                        logging.info(
+                            "---Progress Report for Root URL: %s---\nReplies Processed: %d/%d\nReplies With Spread: %\nTime Spent: %.2f seconds",
+                            url, i, len(replies), replies_found_with_spread, time.time() - start_time)
+
                     if reply.reply_count > 0:
-                        process_tweet_and_replies(reply.url, False, seen_urls, reply_dir)
-                return True
+                        sub_replies, sub_spread = process_tweet_and_replies(reply.url, False, seen_urls, reply_dir, depth + 1)
+                        replies_found_with_spread += sub_spread
+                        total_replies_found += reply.reply_count + sub_replies
+
+                return total_replies_found, replies_found_with_spread
             except Exception as e:
-                logging.error("Error scraping metrics for URL: %s", url, exc_info=True)
                 driver.refresh()
                 time.sleep(10)
                 retries_left -= 1
-        return False
+        return -1, -1
 
     for url in urls:
         try:
-            logging.info("---------- SCRAPING: " + url + " -------------")
+            logging.info("-------------------- SCRAPING: " + url + " --------------------")
+            start_time = time.time()
             seen_urls = set()
             dir_path = os.path.join("data", str(extract_post_id(url)), str(cycle) + "h")
             os.makedirs(dir_path, exist_ok=True)
-            if process_tweet_and_replies(url,True, seen_urls, dir_path):
-                logging.info("---------- Done successfully for URL: %s ----------", url)
+            replies_total, replies_spread_total  = process_tweet_and_replies(url,True, seen_urls, dir_path, 0)
+
+            if replies_total != -1:
+                time_needed = time.time() - start_time
+                logging.info("---------- Done successfully for URL: %s ----------\ntime needed: %.2f\ntotal_replies: %d\nreplies_with_spread: %d", url, time_needed, replies_total, replies_spread_total)
             else:
                 logging.info("---------- FAILED for URL: %s ----------", url)
-
         except Exception as e:
             logging.error("Error processing URL: %s", url, exc_info=True)
 
+def create_driver():
+    geckodriver_path = os.path.join(os.getcwd(), 'geckodriver.exe')
+    service = Service(geckodriver_path)
+    options = Options()
+    #options.add_argument("--headless")
+    driver = webdriver.Firefox(service=service, options=options)
+    driver.maximize_window()
+    return driver
+
+
+def login_all_drivers(drivers):
+    def login_driver(driver):
+        try:
+            login(driver)
+        except Exception as e:
+            raise e
+
+    with ThreadPoolExecutor() as executor:
+        futures = [executor.submit(login_driver, driver) for driver in drivers]
+        for future in futures:
+            future.result()
+
 def hourly_scrape(url_holder, cycles, time_between_cycles):
-    driver = None
-    try:
-        #region preparing the driver and logging in
-        geckodriver_path = os.path.join(os.getcwd(), 'geckodriver.exe')
-        service = Service(geckodriver_path)
-        options = Options()
-        #options.add_argument("--headless")
-        driver = webdriver.Firefox(service=service, options=options)
-        driver.maximize_window()
-        #login needed
-        login(driver)
-        #endregion
+    urls = load_urls_from_file(url_holder)
+    with ThreadPoolExecutor() as executor:
+        try:
+            drivers = [create_driver() for _ in range(len(urls))]
+            print("Logging in all drivers...")
+            login_all_drivers(drivers)
+            print("All drivers logged in successfully.")
 
-        minutes_passed = 0
+            for cycle in range(cycles):
+                logging.info("Cycle %d/%d starting", cycle + 1, cycles)
+                cycle_start_time = time.time()
 
-        for cycle in range(cycles):
-            logging.info("Cycle %d/%d starting", cycle + 1, cycles)
-            urls = load_urls_from_file(url_holder)
-            scrape_start = time.time()
-            scrape(urls, driver, cycle)
-            time_used_for_scraping = time.time() - scrape_start
+                processes = []
+                for i, url in enumerate(urls):
+                    start_time = time.time()
+                    future = executor.submit(scrape, [url], drivers[i], cycle)
+                    processes.append((future, start_time, url))
 
-            minutes_passed += int(time_between_cycles / 60)
+                for future, start_time, url in processes:
+                    future.result()
 
-            time.sleep(time_between_cycles - time_used_for_scraping - 60)
-            print("Next Cycle starting in 60 seconds. Do not work on urls_to_scrape!!!")
-            time.sleep(60)
-    finally:
-        driver.quit()
+                cycle_duration = time.time() - cycle_start_time
+                if cycle < cycles - 1:
+                    sleep_time = max(0, time_between_cycles - cycle_duration)
+                    time.sleep(sleep_time)
+        finally:
+            for driver in drivers:
+                driver.quit()
+
 
 def load_urls_from_file(filename):
     with open(filename, 'r') as file:
