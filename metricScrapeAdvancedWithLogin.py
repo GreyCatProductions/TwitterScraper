@@ -3,6 +3,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
 import time
 from commonMethods import *
+from datetime import datetime
 
 
 def login(driver):
@@ -62,7 +63,7 @@ def login(driver):
     final_login_button.click()
     time.sleep(3)
 
-def get_metrics_login(url, driver, seen_urls, og_post_needed): #login before using this function needed
+def get_tweets(url, driver, sorting_needed, quote_to, seen_urls): #login before using this function needed
     time.sleep(1)
     driver.get(url)
     time.sleep(1)
@@ -70,7 +71,7 @@ def get_metrics_login(url, driver, seen_urls, og_post_needed): #login before usi
     try:
         WebDriverWait(driver, 2).until(
             EC.element_to_be_clickable((By.XPATH, "//span[text()='Hmm...this page doesn’t exist. Try searching for something else.']")))
-        return None, None, seen_urls
+        return None, None
     except Exception:
         pass
 
@@ -86,52 +87,17 @@ def get_metrics_login(url, driver, seen_urls, og_post_needed): #login before usi
         except Exception:
             request_block = False
 
-    og_tweet = None
-
-    if og_post_needed:
-        pattern = re.compile(r"replies|reposts|likes|bookmarks|views")
-        og_post_data = get_main_metrics(driver, pattern)
-
-        if not og_post_data:
-            print("FAILED TO GET DATA + " + url)
-            return None, None, seen_urls
-
-        reply_count, repost_count, like_count, bookmark_count, view_count = get_metrics(og_post_data)
-        time_stamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        og_tweet = Tweet(reply_count, repost_count, like_count, bookmark_count, view_count, "", url, time_stamp)
-
+    if sorting_needed:
         sorting_successfull = click_sort_by_likes_button(driver) #makes twitter replies sorted by likes,
         if not sorting_successfull:
             print("FAILED TO SORT REPLIES!!!")
-            return None, None, seen_urls
+            return None, None
 
-    seen_urls.add(url)
-    replies, seen_urls = get_all_replies(driver, url, seen_urls, og_post_needed)
+    tweet, unique_replies, seen_urls = get_all_posts(driver, url, sorting_needed, quote_to, seen_urls)
 
-    return og_tweet, replies, seen_urls
+    return tweet, unique_replies, seen_urls
 
-def get_metrics(data_text: str) -> tuple: #expects data.get('aria label'....)
-    replies_match = re.search(r"(\d+)\s+replies", data_text)
-    reposts_match = re.search(r"(\d+)\s+reposts", data_text)
-    likes_match = re.search(r"(\d+)\s+likes", data_text)
-    bookmarks_match = re.search(r"(\d+)\s+bookmarks", data_text)
-    views_match = re.search(r"(\d+)\s+views", data_text)
-
-    reply_count = repost_count = like_count = bookmark_count = view_count = 0
-
-    if replies_match:
-        reply_count = int(replies_match.group(1))
-    if reposts_match:
-        repost_count = int(reposts_match.group(1))
-    if likes_match:
-        like_count = int(likes_match.group(1))
-    if bookmarks_match:
-        bookmark_count = int(bookmarks_match.group(1))
-    if views_match:
-        view_count = int(views_match.group(1))
-    return reply_count, repost_count, like_count, bookmark_count, view_count
-
-def get_all_replies(driver, replies_to_url, seen_urls, replies_sorted) -> tuple:
+def get_all_posts(driver, replies_to_url, replies_sorted, quote_to, seen_urls) -> tuple:
     def is_valid_reply(current_element):
         sibling = current_element.find_previous_sibling()
         if sibling:
@@ -139,7 +105,6 @@ def get_all_replies(driver, replies_to_url, seen_urls, replies_sorted) -> tuple:
             if first_child and hasattr(first_child, 'children'):
                 return not any(list(first_child.children))
         return True
-
     def is_spam_button(current_element):
         try:
             element = current_element.find().find().find()
@@ -149,26 +114,6 @@ def get_all_replies(driver, replies_to_url, seen_urls, replies_sorted) -> tuple:
                 return False
         except:
             return False
-
-    def is_last_element(current_element): #funktioniert nicht richtig, beim dynamischen Laden sieht der letzte Platzhalter identisch zum wirklichen letzten Element aus
-        return False
-        try:
-            next_sibling = current_element.find_next_sibling()
-
-            if not next_sibling and len(current_element.contents) == 1:
-                child = current_element.find()
-                if child and len(child.contents) == 1:
-                    inner_child = child.find()
-                    if inner_child and len(inner_child.contents) == 0:
-                        print(current_element.prettify())
-                        print("----")
-                        for post in posts_parent.find_all(recursive=False):
-                            print(post.prettify())
-                        return True
-            return False
-        except:
-            return False
-
     def is_additional_replies_button(current_element):
         try:
             text_element = current_element.find().find().find().find().find().contents[1].find().find().find().find().find()
@@ -177,97 +122,135 @@ def get_all_replies(driver, replies_to_url, seen_urls, replies_sorted) -> tuple:
             return False
         except:
             return False
+    def is_ad(current_element):
+        try:
+            if current_element.find().find.find().get("data-testid") == "placementTracking":
+                return True
+            return False
+        except:
+            return False
 
-    unique_replies = []
+    time.sleep(1)
+    unique_replies: [Tweet] = []
+    og_tweet: Tweet = None
 
     cycles_since_new_found = 0
-    while cycles_since_new_found < 5:
+    while cycles_since_new_found < 50:
         html_source = driver.page_source
         soup = BeautifulSoup(html_source, 'html.parser')
         posts_parent = soup.find(attrs={"aria-label": "Timeline: Conversation"}).find()
 
-        new_unique_replies_found = []
-
         for current_element in posts_parent.find_all(recursive=False):
             try:
-                if is_spam_button(current_element):
-                    print("spam button reached, ending")
-                    unique_replies.extend(new_unique_replies_found)
-                    print("found replies: " + str(len(unique_replies)))
-                    return unique_replies, seen_urls
+                if og_tweet is not None:
+                    if is_ad(current_element):
+                        print("ad found, skipping")
+                        continue
 
-                if is_additional_replies_button(current_element):
-                    print("additional replies button reached, ending")
-                    unique_replies.extend(new_unique_replies_found)
-                    print("found replies: " + str(len(unique_replies)))
-                    return unique_replies, seen_urls
+                    if is_spam_button(current_element):
+                        print("spam button reached, ending")
+                        print("found replies: " + str(len(unique_replies)))
+                        return og_tweet, unique_replies, seen_urls
 
-                if is_last_element(current_element):
-                    print("last element reached, ending")
-                    unique_replies.extend(new_unique_replies_found)
-                    print("found replies: " + str(len(unique_replies)))
-                    return unique_replies, seen_urls
+                    if is_additional_replies_button(current_element):
+                        print("additional replies button reached, ending")
+                        print("found replies: " + str(len(unique_replies)))
+                        return og_tweet, unique_replies, seen_urls
 
-                if not is_valid_reply(current_element):
-                    continue
+                    if not is_valid_reply(current_element):
+                        continue
 
-                #path from post to its metrics
-                metrics_element = current_element.find('div').find('div').find('article').find('div').find('div').contents[-1].contents[-1].contents[-1].find().find()
+                try:
+                    if og_tweet is None:
+                        metrics_element = current_element.find('article').find('div').find('div').contents[-1].contents[-1].contents[-1].find()
+                        href_element = current_element.find('div').find('div').find('article').find('div').find('div').contents[-1].contents[3].find().find().find().find().find()
+                    else:
+                        metrics_element = current_element.find('article').find('div').find('div').contents[-1].contents[-1].contents[-1].find().find()
+                        href_element = metrics_element.contents[3].find()
 
-                #path from metrics_element to href with url
-                href_element = metrics_element.contents[3].find()
-                url = "https://x.com" + '/'.join(href_element.get('href').split("/")[:-1])
-
-                if url not in seen_urls:
-                    cycles_since_new_found = 0
-                    seen_urls.add(url)
+                    href = href_element.get('href')
+                    if href.endswith('/analytics'):
+                        href = href[:-len('/analytics')]
+                    url = "https://x.com" + href
                     data = metrics_element.get("aria-label")
                     reply_count, repost_count, like_count, bookmark_count, view_count = get_metrics(data)
                     time_stamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                except:
+                    continue
 
-                    if not (reply_count == 0):
-                        new_unique_replies_found.append(Tweet(reply_count, repost_count, like_count, bookmark_count, view_count, replies_to_url, url, time_stamp))
+                #skip until tweet is found
+                if og_tweet is None:
+                    if extract_post_id(url) == extract_post_id(replies_to_url):
+                        print("Found main tweet " + url)
+                        og_tweet = Tweet(reply_count, repost_count, like_count, bookmark_count, view_count, "", url, time_stamp, quote_to)
+                        seen_urls.add(og_tweet.url)
+                    continue
+
+                if url not in seen_urls:
+                    cycles_since_new_found = 0
+                    #process unique reply
+                    if not reply_count == 0:
+                        print("Found reply " + url)
+                        unique_replies.append(Tweet(reply_count, repost_count, like_count, bookmark_count, view_count, replies_to_url, url, time_stamp, ""))
+                        print("current replies: " + str(len(unique_replies)))
+                        seen_urls.add(url)
 
                     if replies_sorted and like_count < 3 and reply_count == 0 and repost_count == 0:
                         print("reached posts with no interaction, ending")
-                        unique_replies.extend(new_unique_replies_found)
                         print("found replies: " + str(len(unique_replies)))
-                        return unique_replies, seen_urls
+                        return og_tweet, unique_replies, seen_urls
             except Exception as e:
                 pass
 
-        if new_unique_replies_found:
-            unique_replies.extend(new_unique_replies_found)
-            print("current replies: " + str(len(unique_replies)))
-        else:
-            cycles_since_new_found += 1
-            print("no new found, scrolling")
-            if not scroll(driver, 2000):
-                print("scrolling further impossible, ending")
-                return unique_replies, seen_urls
+        cycles_since_new_found += 1
+        print("no new found, scrolling")
+        if not scroll(driver, 1500):
+            print("scrolling further impossible, ending")
+            return og_tweet, unique_replies, seen_urls
+        time.sleep(1)
 
-            time.sleep(1)
-    print("no new found in 5 cycles. Ending")
+    print("no new found in 50 cycles. Ending")
     print("found replies: " + str(len(unique_replies)))
-    return unique_replies, seen_urls
+    return og_tweet, unique_replies, seen_urls
 
-def get_main_metrics(driver, pattern) -> str: #scrolls until it finds the first pattern. Needed for posts with big images
-    attempts = 0
-    max_attempts = 20
+def get_all_quote_urls(driver, url):
+    link_to_quotes = url + "/quotes"
+    print("getting quotes of: " + url)
+    driver.get(link_to_quotes)
+    WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, '[aria-label="Timeline: Search timeline"]')))
 
-    while attempts < max_attempts:
-        html = driver.page_source
-        soup = BeautifulSoup(html, "html.parser")
-        og_post_data = soup.find(attrs={"aria-label": pattern})
+    urls = set()
 
-        if og_post_data:
-            return og_post_data.get("aria-label")
+    html_source = driver.page_source
+    soup = BeautifulSoup(html_source, 'html.parser')
+    quotes_parent = soup.find(attrs={"aria-label": "Timeline: Search timeline"}).find()
+    cycles_since_new_found = 0
+    while cycles_since_new_found < 10:
+        for current_element in quotes_parent.find_all(recursive=False):
+            try:
+                metrics_element = current_element.find('div').find('div').find('article').find('div').find('div').contents[-1].contents[-1].contents[-1].find().find()
+                href_element = metrics_element.contents[3].find()
+                data = metrics_element.get("aria-label")
+                reply_count, repost_count, like_count, bookmark_count, view_count = get_metrics(data )
+                if reply_count > 0:
+                    cycles_since_new_found = 0
+                    url = "https://x.com" + '/'.join(href_element.get('href').split("/")[:-1])
+                    urls.add(url)
+            except Exception as e:
+                print(e)
+                time.sleep(10)
+                pass
 
-        driver.execute_script("window.scrollBy(0, 400);")
-        time.sleep(0.5)
-        attempts += 1
+        cycles_since_new_found += 1
+        print("no new found, scrolling")
+        if not scroll(driver, 2000):
+            print("scrolling further impossible, ending")
+            return list(urls)
+        time.sleep(1)
 
-    return None
+    print("no new found in 10 cycles. Ending")
+    print("found urls: " + str(len(urls)))
+    return list(urls)
 
 def click_sort_by_likes_button(driver):
     def scroll_until_appears():
@@ -302,6 +285,7 @@ def click_sort_by_likes_button(driver):
 
 def scroll(driver, y_range):
     current_scroll = driver.execute_script("return window.scrollY;")
+    time.sleep(0.1)
     max_scroll = driver.execute_script("return document.body.scrollHeight - window.innerHeight;")
 
     driver.execute_script(f"window.scrollBy(0, {y_range})")
