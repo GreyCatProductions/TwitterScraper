@@ -122,13 +122,12 @@ def get_all_posts(driver, replies_to_url, replies_sorted, quote_to, seen_urls) -
             return False
         except:
             return False
+
     def is_ad(current_element):
-        try:
-            if current_element.find().find.find().get("data-testid") == "placementTracking":
-                return True
-            return False
-        except:
-            return False
+        if current_element.find(string="Ad") and soup.find(attrs={"data-testid": "placementTracking"}):
+            return True
+
+        return False
 
     time.sleep(1)
     unique_replies: [Tweet] = []
@@ -161,13 +160,8 @@ def get_all_posts(driver, replies_to_url, replies_sorted, quote_to, seen_urls) -
                         continue
 
                 try:
-                    if og_tweet is None:
-                        metrics_element = current_element.find('article').find('div').find('div').contents[-1].contents[-1].contents[-1].find()
-                        href_element = current_element.find('div').find('div').find('article').find('div').find('div').contents[-1].contents[3].find().find().find().find().find()
-                    else:
-                        metrics_element = current_element.find('article').find('div').find('div').contents[-1].contents[-1].contents[-1].find().find()
-                        href_element = metrics_element.contents[3].find()
-
+                    metrics_element = current_element.find(attrs={"role": "group"})
+                    href_element = current_element.find(attrs={"role": "link"}, href=re.compile(r"^/[^/]+/status/\d+$"))
                     href = href_element.get('href')
                     if href.endswith('/analytics'):
                         href = href[:-len('/analytics')]
@@ -175,7 +169,10 @@ def get_all_posts(driver, replies_to_url, replies_sorted, quote_to, seen_urls) -
                     data = metrics_element.get("aria-label")
                     reply_count, repost_count, like_count, bookmark_count, view_count = get_metrics(data)
                     time_stamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                except:
+
+                except Exception as e:
+                    print("skipped, failed")
+                    print(e)
                     continue
 
                 #skip until tweet is found
@@ -184,6 +181,7 @@ def get_all_posts(driver, replies_to_url, replies_sorted, quote_to, seen_urls) -
                         print("Found main tweet " + url)
                         og_tweet = Tweet(reply_count, repost_count, like_count, bookmark_count, view_count, "", url, time_stamp, quote_to)
                         seen_urls.add(og_tweet.url)
+
                     continue
 
                 if url not in seen_urls:
@@ -225,7 +223,7 @@ def get_all_quote_urls(driver, url):
     soup = BeautifulSoup(html_source, 'html.parser')
     quotes_parent = soup.find(attrs={"aria-label": "Timeline: Search timeline"}).find()
     cycles_since_new_found = 0
-    while cycles_since_new_found < 10:
+    while cycles_since_new_found < 100:
         for current_element in quotes_parent.find_all(recursive=False):
             try:
                 metrics_element = current_element.find('div').find('div').find('article').find('div').find('div').contents[-1].contents[-1].contents[-1].find().find()
@@ -248,7 +246,7 @@ def get_all_quote_urls(driver, url):
             return list(urls)
         time.sleep(1)
 
-    print("no new found in 10 cycles. Ending")
+    print("no new found in 100 cycles. Ending")
     print("found urls: " + str(len(urls)))
     return list(urls)
 

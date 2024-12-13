@@ -23,8 +23,8 @@ def scrape(urls, driver, cycle):
                 total_replies_found: int = 0
                 tweet, replies,seen_urls = get_tweets(url, driver, is_root, quote_to, seen_urls)
 
-                if tweet is None and replies is None:
-                    print("failed to get data for: " + url)
+                if tweet is None:
+                    print("Failed to fetch tweet" + url)
                     return 0, 0
 
                 try:
@@ -43,6 +43,8 @@ def scrape(urls, driver, cycle):
                 replies_found_with_spread = len(replies)
 
                 for i, reply in enumerate(replies):
+                    if reply is None:
+                        continue
                     reply_dir = os.path.join(extendable_path, str(extract_post_id(reply.url)))
                     os.makedirs(reply_dir, exist_ok=True)
                     reply_post_path = os.path.join(reply_dir, "reply.csv")
@@ -115,7 +117,7 @@ def login_all_drivers(drivers):
 
 def hourly_scrape(url_holder, cycles, time_between_cycles):
     urls = load_urls_from_file(url_holder)
-    with ThreadPoolExecutor() as executor:
+    with ThreadPoolExecutor(max_workers=5) as executor:
         try:
             drivers = [create_driver() for _ in range(len(urls))]
             print("Logging in all drivers...")
