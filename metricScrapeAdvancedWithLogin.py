@@ -1,9 +1,9 @@
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.common.by import By
 import time
 from commonMethods import *
 from datetime import datetime
+import shutil
 
 
 def login(driver):
@@ -63,17 +63,14 @@ def login(driver):
     final_login_button.click()
     time.sleep(3)
 
-def get_tweets(url, driver, sorting_needed, quote_to, seen_urls): #login before using this function needed
+def get_tweets(url, driver, sorting_needed, quote_to, seen_urls, hour_final_path): #login before using this function needed
     time.sleep(1)
     driver.get(url)
     time.sleep(1)
     print("Scraping: " + str(url))
-    try:
-        WebDriverWait(driver, 2).until(
-            EC.element_to_be_clickable((By.XPATH, "//span[text()='Hmm...this page doesn’t exist. Try searching for something else.']")))
-        return None, None
-    except Exception:
-        pass
+
+    if not check_if_page_exists(driver):
+        return None, None, None
 
     retries = 5
     request_block = True
@@ -87,6 +84,8 @@ def get_tweets(url, driver, sorting_needed, quote_to, seen_urls): #login before 
         except Exception:
             request_block = False
 
+    screenshot_save_path = screen_shot(driver, hour_final_path)
+
     if sorting_needed:
         sorting_successfull = click_sort_by_likes_button(driver) #makes twitter replies sorted by likes,
         if not sorting_successfull:
@@ -94,6 +93,11 @@ def get_tweets(url, driver, sorting_needed, quote_to, seen_urls): #login before 
             return None, None
 
     tweet, unique_replies, seen_urls = get_all_posts(driver, url, sorting_needed, quote_to, seen_urls)
+
+    post_id = extract_post_id(tweet.url)
+    new_file_name = f"{post_id}.png"
+    new_file_path = os.path.join(os.path.dirname(screenshot_save_path), new_file_name)
+    shutil.move(screenshot_save_path, new_file_path)
 
     return tweet, unique_replies, seen_urls
 
@@ -134,7 +138,7 @@ def get_all_posts(driver, replies_to_url, replies_sorted, quote_to, seen_urls) -
     og_tweet: Tweet = None
 
     cycles_since_new_found = 0
-    while cycles_since_new_found < 50:
+    while cycles_since_new_found < 30:
         html_source = driver.page_source
         soup = BeautifulSoup(html_source, 'html.parser')
         posts_parent = soup.find(attrs={"aria-label": "Timeline: Conversation"}).find()
@@ -161,11 +165,16 @@ def get_all_posts(driver, replies_to_url, replies_sorted, quote_to, seen_urls) -
 
                 try:
                     metrics_element = current_element.find(attrs={"role": "group"})
+                    if metrics_element is None:
+                        print("Could not find metrics element!!!")
+                        print(current_element)
+
                     href_element = current_element.find(attrs={"role": "link"}, href=re.compile(r"^/[^/]+/status/\d+$"))
                     href = href_element.get('href')
                     if href.endswith('/analytics'):
                         href = href[:-len('/analytics')]
                     url = "https://x.com" + href
+                    user_url = extract_post_poster(url)
                     data = metrics_element.get("aria-label")
                     reply_count, repost_count, like_count, bookmark_count, view_count = get_metrics(data)
                     time_stamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -179,7 +188,7 @@ def get_all_posts(driver, replies_to_url, replies_sorted, quote_to, seen_urls) -
                 if og_tweet is None:
                     if extract_post_id(url) == extract_post_id(replies_to_url):
                         print("Found main tweet " + url)
-                        og_tweet = Tweet(reply_count, repost_count, like_count, bookmark_count, view_count, "", url, time_stamp, quote_to)
+                        og_tweet = Tweet(reply_count, repost_count, like_count, bookmark_count, view_count, "", url, time_stamp, quote_to, user_url)
                         seen_urls.add(og_tweet.url)
 
                     continue
@@ -189,7 +198,7 @@ def get_all_posts(driver, replies_to_url, replies_sorted, quote_to, seen_urls) -
                     #process unique reply
                     if not reply_count == 0:
                         print("Found reply " + url)
-                        unique_replies.append(Tweet(reply_count, repost_count, like_count, bookmark_count, view_count, replies_to_url, url, time_stamp, ""))
+                        unique_replies.append(Tweet(reply_count, repost_count, like_count, bookmark_count, view_count, replies_to_url, url, time_stamp, "", user_url))
                         print("current replies: " + str(len(unique_replies)))
                         seen_urls.add(url)
 
@@ -202,12 +211,12 @@ def get_all_posts(driver, replies_to_url, replies_sorted, quote_to, seen_urls) -
 
         cycles_since_new_found += 1
         print("no new found, scrolling")
-        if not scroll(driver, 1500):
+        if not scroll(driver, 1750):
             print("scrolling further impossible, ending")
             return og_tweet, unique_replies, seen_urls
         time.sleep(1)
 
-    print("no new found in 50 cycles. Ending")
+    print("no new found in 30 cycles. Ending")
     print("found replies: " + str(len(unique_replies)))
     return og_tweet, unique_replies, seen_urls
 
@@ -284,11 +293,12 @@ def click_sort_by_likes_button(driver):
 def scroll(driver, y_range):
     current_scroll = driver.execute_script("return window.scrollY;")
     time.sleep(0.1)
-    max_scroll = driver.execute_script("return document.body.scrollHeight - window.innerHeight;")
 
-    driver.execute_script(f"window.scrollBy(0, {y_range})")
+    max_scroll = driver.execute_script("return document.body.scrollHeight - window.innerHeight;")
+    driver.execute_script(f"window.scrollBy(0, {y_range});")
 
     new_scroll = driver.execute_script("return window.scrollY;")
 
-    return new_scroll > current_scroll or current_scroll < max_scroll
+    return new_scroll != current_scroll and new_scroll < max_scroll
+
 

@@ -1,9 +1,8 @@
 import logging
-import time
-
 from metricScrapeNoLogin import *
 from metricScrapeAdvancedWithLogin import *
 from concurrent.futures import ThreadPoolExecutor
+from user_scrape import *
 
 #region logging
 logging.basicConfig(
@@ -14,41 +13,46 @@ logging.basicConfig(
 )
 #endregion
 
-def scrape(urls, driver, cycle):
-    def process_tweet_and_replies(url: str, is_root: bool, quote_to: str, extendable_path: str, depth=0, seen_urls = set()):
+def scrape(urls, driver, cycle, detailed_folders):
+    def process_tweet_and_replies(url: str, is_root: bool, quote_to: str, extendable_path: str, depth: int = 0, seen_urls: set = set(), users: set = set()):
         retries_left = 10 if is_root else 3
 
         while retries_left > 0:
             try:
                 total_replies_found: int = 0
-                tweet, replies,seen_urls = get_tweets(url, driver, is_root, quote_to, seen_urls)
+                tweet, replies,seen_urls = get_tweets(url, driver, is_root, quote_to, seen_urls, hour_final_path)
 
                 if tweet is None:
                     print("Failed to fetch tweet" + url)
-                    return 0, 0
+                    return 0, 0, users
 
                 try:
                     if len(replies) > 0:
-                        save_to_csv_login(replies, total_csv_path)
+                        save_tweets(replies, total_csv_path)
                 except Exception as e:
                     print("SAVING FAILED!!!")
                     logging.error(e)
 
                 if is_root:
                     total_replies_found += tweet.reply_count
+                    users.add(tweet.user_url)
                     file_path_og_post = os.path.join(dir_path, "og_post.csv")
-                    save_to_csv_login([tweet], total_csv_path)
-                    save_to_csv_login([tweet], file_path_og_post)
+                    save_tweets([tweet], total_csv_path)
+                    if detailed_folders:
+                        save_tweets([tweet], file_path_og_post)
 
                 replies_found_with_spread = len(replies)
 
                 for i, reply in enumerate(replies):
                     if reply is None:
                         continue
+
                     reply_dir = os.path.join(extendable_path, str(extract_post_id(reply.url)))
-                    os.makedirs(reply_dir, exist_ok=True)
-                    reply_post_path = os.path.join(reply_dir, "reply.csv")
-                    save_to_csv_login([reply], reply_post_path)
+
+                    if detailed_folders:
+                        os.makedirs(reply_dir, exist_ok=True)
+                        reply_post_path = os.path.join(reply_dir, "reply.csv")
+                        save_tweets([reply], reply_post_path)
 
                     if is_root and i % 5 == 0 and i != 0:
                         logging.info(
@@ -56,17 +60,29 @@ def scrape(urls, driver, cycle):
                             url, i, len(replies), replies_found_with_spread, time.time() - start_time)
 
                     if reply.reply_count > 0:
-                        sub_replies, sub_spread = process_tweet_and_replies(reply.url, False, "", reply_dir, depth + 1, seen_urls)
-                        replies_found_with_spread += sub_spread
-                        total_replies_found += reply.reply_count + sub_replies
-                return total_replies_found, replies_found_with_spread
+                        try:
+                            sub_replies, sub_spread, users = process_tweet_and_replies(reply.url, False, "", reply_dir, depth + 1, seen_urls, users)
+                            users.add(tweet.user_url)
+                            replies_found_with_spread += sub_spread
+                            total_replies_found += reply.reply_count + sub_replies
+                        except Exception as e:
+                            print("failed to process reply: " + reply.url)
+                            print(e)
+                            continue
+                return total_replies_found, replies_found_with_spread, users
             except Exception as e:
                 print("failed to scrape tweet: " + url)
                 print(e)
                 driver.refresh()
                 time.sleep(10)
                 retries_left -= 1
-        return 0, 0
+        return 0, 0, users
+
+    def process_users(user_urls: set):
+        users_path = os.path.join(dir_path, "users.csv")
+        for user_url in user_urls:
+            user = get_user_stats(driver, user_url)
+            save_users([user], users_path)
 
     for url in urls:
         try:
@@ -74,9 +90,13 @@ def scrape(urls, driver, cycle):
             start_time = time.time()
             dir_path = os.path.join("data", str(extract_post_id(url)), str(cycle) + "h")
             total_csv_path = os.path.join(dir_path, "total.csv")
+            hour_final_path = dir_path
             os.makedirs(dir_path, exist_ok=True)
-            replies_total, replies_with_spread_total = process_tweet_and_replies(url,True, "", dir_path)
 
+            #replies
+            replies_total, replies_with_spread_total, user_urls = process_tweet_and_replies(url,True, "", dir_path)
+
+            #quotes
             quote_urls = get_all_quote_urls(driver, url)
 
             quote_replies_total, quotes_spread_total = 0, 0
@@ -84,6 +104,9 @@ def scrape(urls, driver, cycle):
                 quote_replies, quotes_with_spread = process_tweet_and_replies(quote_url,True, url, dir_path)
                 quote_replies_total += quote_replies
                 quotes_spread_total += quotes_with_spread
+
+            #users
+            process_users(user_urls)
 
             if replies_total != -1:
                 time_needed = time.time() - start_time
@@ -115,7 +138,7 @@ def login_all_drivers(drivers):
         for future in futures:
             future.result()
 
-def hourly_scrape(url_holder, cycles, time_between_cycles):
+def hourly_scrape(url_holder, cycles, time_between_cycles, detailed_folders):
     urls = load_urls_from_file(url_holder)
     with ThreadPoolExecutor(max_workers=5) as executor:
         try:
@@ -131,7 +154,7 @@ def hourly_scrape(url_holder, cycles, time_between_cycles):
                 processes = []
                 for i, url in enumerate(urls):
                     start_time = time.time()
-                    future = executor.submit(scrape, [url], drivers[i], cycle)
+                    future = executor.submit(scrape, [url], drivers[i], cycle, detailed_folders)
                     processes.append((future, start_time, url))
 
                 for future, start_time, url in processes:
@@ -150,4 +173,4 @@ def load_urls_from_file(filename):
     with open(filename, 'r') as file:
         return [line.strip() for line in file if line.strip()]
 
-hourly_scrape("urls_to_scrape", 24, 3600)
+hourly_scrape("urls_to_scrape", 24, 3600, False)
