@@ -4,64 +4,6 @@ from commonMethods import *
 from datetime import datetime
 import shutil
 
-
-def login(driver):
-    driver.get("https://x.com/home")
-
-    time.sleep(1)
-    scroll(driver, 500)
-
-    # Wait for the page to load and locate the login button
-    login_button = WebDriverWait(driver, 300).until(
-        EC.element_to_be_clickable((By.XPATH, "//span[text()='Anmelden']"))
-    )
-    time.sleep(1)
-    login_button.click()
-
-    # Locate and interact with email/username field
-    email_text = WebDriverWait(driver, 300).until(
-        EC.presence_of_element_located(
-            (By.XPATH, "//span[text()='Telefonnummer, E-Mail-Adresse oder Nutzername']"))
-    )
-    email_field = email_text.find_element(By.XPATH, "ancestor::*[4]")
-    time.sleep(1)
-    email_field.click()
-    driver.switch_to.active_element.send_keys("shapovalov@connected-organization.de")
-
-    # Click "Weiter" to proceed
-    next_button = WebDriverWait(driver, 300).until(
-        EC.element_to_be_clickable((By.XPATH, "//span[text()='Weiter']/ancestor::*[2]"))
-    )
-    next_button.click()
-
-    # Handle unusual activity prompt if it appears
-    try:
-        unusual_activity = WebDriverWait(driver, 5).until(
-            EC.presence_of_element_located(
-                (By.XPATH, "//span[contains(text(), 'ungewöhnliche Anmeldeaktivität')]"))
-        )
-        driver.switch_to.active_element.send_keys("OlegShap05")
-        next_button = WebDriverWait(driver, 5).until(
-            EC.element_to_be_clickable((By.XPATH, "//span[text()='Weiter']/ancestor::*[2]"))
-        )
-        next_button.click()
-    except:
-        pass
-
-    time.sleep(1)
-    # Enter password and complete login
-    #WebDriverWait(driver, 300).until(
-    #    EC.presence_of_element_located((By.XPATH, "//span[text()='Passwort']"))
-    #)
-    driver.switch_to.active_element.send_keys("Twitter48311!")
-
-    time.sleep(1)
-    final_login_button = WebDriverWait(driver, 300).until(
-        EC.element_to_be_clickable((By.XPATH, "(//span[text()='Anmelden'])/ancestor::*[3]"))
-    )
-    final_login_button.click()
-    time.sleep(3)
-
 def get_tweets(url, driver, sorting_needed, quote_to, seen_urls, hour_final_path): #login before using this function needed
     time.sleep(1)
     driver.get(url)

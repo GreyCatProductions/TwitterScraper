@@ -166,14 +166,83 @@ def create_driver():
 
 
 def login_all_drivers(drivers):
-    def login_driver(driver):
+    def login(driver):
+        def read_login_data():
+            login_data = {}
+            with open('login_data', 'r') as file:
+                for line in file:
+                    key, value = line.strip().split('=')
+                    login_data[key] = value
+            return login_data
+
         try:
-            login(driver)
+            login_data = read_login_data()
+            username = login_data.get('username')
+            email = login_data.get('email')
+            password = login_data.get('password')
+            if not username or not password or not email:
+                raise ValueError("Username or password or email is missing in the login_data.txt file.")
+
+            driver.get("https://x.com/home")
+
+            time.sleep(1)
+            scroll(driver, 500)
+
+            # Wait for the page to load and locate the login button
+            login_button = WebDriverWait(driver, 300).until(
+                EC.element_to_be_clickable((By.XPATH, "//span[text()='Anmelden']"))
+            )
+            time.sleep(1)
+            login_button.click()
+
+            # Locate and interact with email/username field
+            email_text = WebDriverWait(driver, 300).until(
+                EC.presence_of_element_located(
+                    (By.XPATH, "//span[text()='Telefonnummer, E-Mail-Adresse oder Nutzername']"))
+            )
+            email_field = email_text.find_element(By.XPATH, "ancestor::*[4]")
+            time.sleep(1)
+            email_field.click()
+            driver.switch_to.active_element.send_keys(email)
+
+            # Click "Weiter" to proceed
+            next_button = WebDriverWait(driver, 300).until(
+                EC.element_to_be_clickable((By.XPATH, "//span[text()='Weiter']/ancestor::*[2]"))
+            )
+            next_button.click()
+
+            # Handle unusual activity prompt if it appears
+            try:
+                unusual_activity = WebDriverWait(driver, 5).until(
+                    EC.presence_of_element_located(
+                        (By.XPATH, "//span[contains(text(), 'ungewöhnliche Anmeldeaktivität')]"))
+                )
+                driver.switch_to.active_element.send_keys(username)
+                next_button = WebDriverWait(driver, 5).until(
+                    EC.element_to_be_clickable((By.XPATH, "//span[text()='Weiter']/ancestor::*[2]"))
+                )
+                next_button.click()
+            except:
+                pass
+
+            time.sleep(1)
+            # Enter password and complete login
+            # WebDriverWait(driver, 300).until(
+            #    EC.presence_of_element_located((By.XPATH, "//span[text()='Passwort']"))
+            # )
+            driver.switch_to.active_element.send_keys(password)
+
+            time.sleep(1)
+            final_login_button = WebDriverWait(driver, 300).until(
+                EC.element_to_be_clickable((By.XPATH, "(//span[text()='Anmelden'])/ancestor::*[3]"))
+            )
+            final_login_button.click()
+            time.sleep(3)
         except Exception as e:
             raise e
 
     with ThreadPoolExecutor() as executor:
-        futures = [executor.submit(login_driver, driver) for driver in drivers]
+        futures = [executor.submit(login, driver) for driver in drivers]
         for future in futures:
             future.result()
 
