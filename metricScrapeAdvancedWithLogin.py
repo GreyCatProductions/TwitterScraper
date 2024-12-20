@@ -1,5 +1,4 @@
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+import traceback
 import time
 from commonMethods import *
 from datetime import datetime
@@ -164,13 +163,9 @@ def get_all_posts(driver, replies_to_url, replies_sorted, quote_to, seen_urls) -
                         continue
 
                 try:
-                    metrics_element = current_element.find(attrs={"role": "group"})
-                    if metrics_element is None:
-                        print("Could not find metrics element!!!")
-                        print(current_element)
+                    metrics_element, href_element = get_metrics_and_href_element(current_element)
+                    href = href_element.get("href")
 
-                    href_element = current_element.find(attrs={"role": "link"}, href=re.compile(r"^/[^/]+/status/\d+$"))
-                    href = href_element.get('href')
                     if href.endswith('/analytics'):
                         href = href[:-len('/analytics')]
                     url = "https://x.com" + href
@@ -211,7 +206,7 @@ def get_all_posts(driver, replies_to_url, replies_sorted, quote_to, seen_urls) -
 
         cycles_since_new_found += 1
         print("no new found, scrolling")
-        if not scroll(driver, 1750):
+        if not scroll(driver, 1500):
             print("scrolling further impossible, ending")
             return og_tweet, unique_replies, seen_urls
         time.sleep(1)
@@ -221,43 +216,57 @@ def get_all_posts(driver, replies_to_url, replies_sorted, quote_to, seen_urls) -
     return og_tweet, unique_replies, seen_urls
 
 def get_all_quote_urls(driver, url):
-    link_to_quotes = url + "/quotes"
-    print("getting quotes of: " + url)
-    driver.get(link_to_quotes)
-    WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, '[aria-label="Timeline: Search timeline"]')))
+    try:
+        link_to_quotes = url + "/quotes"
+        print("getting quotes of: " + url)
+        driver.get(link_to_quotes)
+        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, '[aria-label="Timeline: Search timeline"]')))
 
-    urls = set()
+        urls = set()
+        total_quotes_counter = 0
 
-    html_source = driver.page_source
-    soup = BeautifulSoup(html_source, 'html.parser')
-    quotes_parent = soup.find(attrs={"aria-label": "Timeline: Search timeline"}).find()
-    cycles_since_new_found = 0
-    while cycles_since_new_found < 100:
-        for current_element in quotes_parent.find_all(recursive=False):
-            try:
-                metrics_element = current_element.find('div').find('div').find('article').find('div').find('div').contents[-1].contents[-1].contents[-1].find().find()
-                href_element = metrics_element.contents[3].find()
-                data = metrics_element.get("aria-label")
-                reply_count, repost_count, like_count, bookmark_count, view_count = get_metrics(data )
-                if reply_count > 0:
-                    cycles_since_new_found = 0
-                    url = "https://x.com" + '/'.join(href_element.get('href').split("/")[:-1])
-                    urls.add(url)
-            except Exception as e:
-                print(e)
-                time.sleep(10)
-                pass
+        html_source = driver.page_source
+        soup = BeautifulSoup(html_source, 'html.parser')
+        quotes_parent = soup.find(attrs={"aria-label": "Timeline: Search timeline"}).find()
+        cycles_since_new_found = 0
+        while cycles_since_new_found < 100:
+            for current_element in quotes_parent.find_all(recursive=False):
+                try:
+                    metrics_element, href_element = get_metrics_and_href_element(current_element)
+                    href = href_element.get("href")
+                    data = metrics_element.get("aria-label")
+                    reply_count, repost_count, like_count, bookmark_count, view_count = get_metrics(data)
+                    url = "https://x.com" + '/'.join(href.split("/")[:-1])
 
-        cycles_since_new_found += 1
-        print("no new found, scrolling")
-        if not scroll(driver, 2000):
-            print("scrolling further impossible, ending")
-            return list(urls)
-        time.sleep(1)
+                    if url not in urls:
+                        cycles_since_new_found = 0
+                        total_quotes_counter += 1
+                        if reply_count > 0:
+                            urls.add(url)
+                except Exception as e:
+                    print(e)
+                    traceback.print_exc()
+                    time.sleep(10)
+                    pass
 
-    print("no new found in 100 cycles. Ending")
-    print("found urls: " + str(len(urls)))
-    return list(urls)
+            cycles_since_new_found += 1
+            print("no new found, scrolling")
+            if not scroll(driver, 2000):
+                print("scrolling further impossible, ending")
+                return list(urls), total_quotes_counter
+            time.sleep(1)
+
+        print("no new found in 100 cycles. Ending")
+        print("found urls: " + str(len(urls)))
+        return list(urls), total_quotes_counter
+    except Exception as e:
+        print("failed to get quotes for : " + url)
+        return -1, -1
+
+def get_metrics_and_href_element(parent_element):
+    metrics_element = parent_element.find(attrs={"role": "group"})
+    href_element = parent_element.find(attrs={"role": "link"}, href=re.compile(r"^/[^/]+/status/\d+$"))
+    return metrics_element, href_element
 
 def click_sort_by_likes_button(driver):
     def scroll_until_appears():
