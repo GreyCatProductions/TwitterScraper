@@ -1,5 +1,8 @@
 from bs4 import Tag, NavigableString
 import time
+
+from selenium.common import TimeoutException
+
 from commonMethods import *
 
 def get_user_stats(driver, user_url: str):  # Expects logged in and open driver
@@ -14,7 +17,6 @@ def get_user_stats(driver, user_url: str):  # Expects logged in and open driver
 
         if not profile_parent:
             print("Profile parent not found.")
-            return None
 
         post_count = None
         post_count_header = profile_parent.find('h2')
@@ -40,20 +42,22 @@ def get_user_stats(driver, user_url: str):  # Expects logged in and open driver
         followers_count = None
         following_count = None
 
-        try:
-            followers_element = profile_parent.find('a', href=lambda x: x and "/verified_followers" in x)
-            if followers_element:
-                followers_count = followers_element.text.strip()
+        followers_element = profile_parent.find('a', href=lambda x: x and "/verified_followers" in x)
+        if followers_element:
+            followers_count = followers_element.text.strip()
 
-            following_element = profile_parent.find('a', href=lambda x: x and "/following" in x)
-            if following_element:
-                following_count = following_element.text.strip()
-        except AttributeError:
-            print("Failed to extract followers/following counts.")
+        following_element = profile_parent.find('a', href=lambda x: x and "/following" in x)
+        if following_element:
+            following_count = following_element.text.strip()
 
         user = User(user_url, description, following_count, followers_count, post_count)
         return user
-
+    except TimeoutException: #happens when side does not load properly for some reason. Fixed by simple refresh
+        driver.refresh()
+        time.sleep(3)
+    except AttributeError: #happens when too many requests happened. Fixed by waiting and refreshing
+        driver.refresh()
+        time.sleep(60)
     except Exception as e:
         print(f"Error while getting user stats: {e}")
         return None

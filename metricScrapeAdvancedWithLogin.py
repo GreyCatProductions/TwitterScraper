@@ -67,7 +67,6 @@ def get_all_posts(driver, replies_to_url, replies_sorted, quote_to, seen_urls) -
             return False
         except:
             return False
-
     def is_ad(current_element):
         if current_element.find(string="Ad") and soup.find(attrs={"data-testid": "placementTracking"}):
             return True
@@ -207,7 +206,11 @@ def get_all_quote_urls(driver, url):
 
 def get_metrics_and_href_element(parent_element):
     metrics_element = parent_element.find(attrs={"role": "group"})
-    href_element = parent_element.find(attrs={"role": "link"}, href=re.compile(r"^/[^/]+/status/\d+$"))
+    if metrics_element is None:
+        raise Exception("Metrics element not found")
+    href_element = parent_element.find(lambda tag: tag.get("role") == "link" and re.match(r"^/[^/]+/status/\d+$", tag.get("href", "")) and (tag.has_attr("aria-describedby") or tag.has_attr("aria-label")))
+    if href_element is None:
+        raise Exception("Href element not found")
     return metrics_element, href_element
 
 def click_sort_by_likes_button(driver):

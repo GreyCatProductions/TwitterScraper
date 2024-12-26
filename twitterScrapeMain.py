@@ -1,8 +1,11 @@
-import logging
 from metricScrapeNoLogin import *
 from metricScrapeAdvancedWithLogin import *
-from concurrent.futures import ThreadPoolExecutor
 from user_scrape import *
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
+import logging
+
+from queue import Queue
 
 #region logging
 logging.basicConfig(
@@ -56,8 +59,8 @@ def scrape(urls, driver, cycle, detailed_folders):
 
                     if is_root and i % 5 == 0 and i != 0:
                         logging.info(
-                            "---Progress Report for Root URL: %s---\nTotal replies processed: %d\nFirst Layer Replies Processed: %d/%d\nReplies With Spread: %d\nTime Spent: %.2f seconds\nAverage time per post: %.2f seconds\n",
-                            url, total_replies_found, i, len(replies), replies_found_with_spread, time.time() - start_time, (time.time() - start_time) / replies_found_with_spread)
+                            "---Progress Report for Root URL: %s---\nTotal replies processed: %d\nFirst Layer Replies Processed: %d/%d\nReplies With Spread found: %d\nTime Spent: %.2f seconds\nAverage time to process first layer reply spread: %.2f seconds\n",
+                            url, total_replies_found, i, len(replies), replies_found_with_spread, time.time() - start_time, (time.time() - start_time) / i)
 
                     if reply.reply_count > 0:
                         try:
@@ -161,12 +164,66 @@ def create_driver():
     options = Options()
     #options.add_argument("--headless")
     driver = webdriver.Firefox(service=service, options=options)
+    driver.set_page_load_timeout(10)
     driver.maximize_window()
     return driver
 
-
 def login_all_drivers(drivers):
-    def login(driver):
+    def login(driver: webdriver, username, password):
+        driver.get("https://x.com/home")
+
+        time.sleep(1)
+        scroll(driver, 500)
+
+        # Wait for the page to load and locate the login button
+        login_button = WebDriverWait(driver, 300).until(
+            EC.element_to_be_clickable((By.XPATH, "//span[text()='Anmelden']"))
+        )
+        time.sleep(1)
+        login_button.click()
+
+        # Locate and interact with email/username field
+        email_text = WebDriverWait(driver, 300).until(
+            EC.presence_of_element_located(
+                (By.XPATH, "//span[text()='Telefonnummer, E-Mail-Adresse oder Nutzername']"))
+        )
+        email_field = email_text.find_element(By.XPATH, "ancestor::*[4]")
+        time.sleep(1)
+        email_field.click()
+        driver.switch_to.active_element.send_keys(username)
+
+        # Click "Weiter" to proceed
+        next_button = WebDriverWait(driver, 300).until(
+            EC.element_to_be_clickable((By.XPATH, "//span[text()='Weiter']/ancestor::*[2]"))
+        )
+        next_button.click()
+
+        # Handle unusual activity prompt if it appears
+        try:
+            unusual_activity = WebDriverWait(driver, 5).until(
+                EC.presence_of_element_located(
+                    (By.XPATH, "//span[contains(text(), 'ungewöhnliche Anmeldeaktivität')]"))
+            )
+            driver.switch_to.active_element.send_keys(username)
+            next_button = WebDriverWait(driver, 5).until(
+                EC.element_to_be_clickable((By.XPATH, "//span[text()='Weiter']/ancestor::*[2]"))
+            )
+            next_button.click()
+        except:
+            pass
+
+        time.sleep(1)
+
+        driver.switch_to.active_element.send_keys(password)
+
+        time.sleep(1)
+        final_login_button = WebDriverWait(driver, 300).until(
+            EC.element_to_be_clickable((By.XPATH, "(//span[text()='Anmelden'])/ancestor::*[3]"))
+        )
+        final_login_button.click()
+        time.sleep(3)
+
+    def get_login_data():
         def read_login_data():
             login_data = {}
             with open('login_data', 'r') as file:
@@ -175,82 +232,40 @@ def login_all_drivers(drivers):
                     login_data[key] = value
             return login_data
 
-        try:
-            login_data = read_login_data()
-            username = login_data.get('username')
-            email = login_data.get('email')
-            password = login_data.get('password')
-            if not username or not password or not email:
-                raise ValueError("Username or password or email is missing in the login_data.txt file.")
+        unfiltered_data = read_login_data()
 
-            driver.get("https://x.com/home")
+        login_data = [
+            {
+                'username': unfiltered_data.get('username1'),
+                'password': unfiltered_data.get('password1')
+            },
+            {
+                'username': unfiltered_data.get('username2'),
+                'password': unfiltered_data.get('password2')
+            }
+        ]
 
-            time.sleep(1)
-            scroll(driver, 500)
+        for data in login_data:
+            if not data['password'] or not data['username']:
+                raise ValueError("Username, password, or email is missing in the login_data.txt file.")
+        return login_data
 
-            # Wait for the page to load and locate the login button
-            login_button = WebDriverWait(driver, 300).until(
-                EC.element_to_be_clickable((By.XPATH, "//span[text()='Anmelden']"))
-            )
-            time.sleep(1)
-            login_button.click()
-
-            # Locate and interact with email/username field
-            email_text = WebDriverWait(driver, 300).until(
-                EC.presence_of_element_located(
-                    (By.XPATH, "//span[text()='Telefonnummer, E-Mail-Adresse oder Nutzername']"))
-            )
-            email_field = email_text.find_element(By.XPATH, "ancestor::*[4]")
-            time.sleep(1)
-            email_field.click()
-            driver.switch_to.active_element.send_keys(email)
-
-            # Click "Weiter" to proceed
-            next_button = WebDriverWait(driver, 300).until(
-                EC.element_to_be_clickable((By.XPATH, "//span[text()='Weiter']/ancestor::*[2]"))
-            )
-            next_button.click()
-
-            # Handle unusual activity prompt if it appears
-            try:
-                unusual_activity = WebDriverWait(driver, 5).until(
-                    EC.presence_of_element_located(
-                        (By.XPATH, "//span[contains(text(), 'ungewöhnliche Anmeldeaktivität')]"))
-                )
-                driver.switch_to.active_element.send_keys(username)
-                next_button = WebDriverWait(driver, 5).until(
-                    EC.element_to_be_clickable((By.XPATH, "//span[text()='Weiter']/ancestor::*[2]"))
-                )
-                next_button.click()
-            except:
-                pass
-
-            time.sleep(1)
-            # Enter password and complete login
-            # WebDriverWait(driver, 300).until(
-            #    EC.presence_of_element_located((By.XPATH, "//span[text()='Passwort']"))
-            # )
-            driver.switch_to.active_element.send_keys(password)
-
-            time.sleep(1)
-            final_login_button = WebDriverWait(driver, 300).until(
-                EC.element_to_be_clickable((By.XPATH, "(//span[text()='Anmelden'])/ancestor::*[3]"))
-            )
-            final_login_button.click()
-            time.sleep(3)
-        except Exception as e:
-            raise e
+    logins = get_login_data()
 
     with ThreadPoolExecutor() as executor:
-        futures = [executor.submit(login, driver) for driver in drivers]
+        futures = [executor.submit(login, driver, logins[i]['username'], logins[i]['password']) for i, driver in enumerate(drivers)]
         for future in futures:
             future.result()
 
 def hourly_scrape(url_holder, cycles, time_between_cycles, detailed_folders):
     urls = load_urls_from_file(url_holder)
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    url_queue = Queue()
+    for url in urls:
+        url_queue.put(url)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
         try:
-            drivers = [create_driver() for _ in range(len(urls))]
+            drivers = [create_driver() for _ in range(2)]
             print("Logging in all drivers...")
             login_all_drivers(drivers)
             print("All drivers logged in successfully.")
@@ -259,22 +274,37 @@ def hourly_scrape(url_holder, cycles, time_between_cycles, detailed_folders):
                 logging.info("Cycle %d/%d starting", cycle + 1, cycles)
                 cycle_start_time = time.time()
 
-                processes = []
-                for i, url in enumerate(urls):
-                    start_time = time.time()
-                    future = executor.submit(scrape, [url], drivers[i], cycle, detailed_folders)
-                    processes.append((future, start_time, url))
+                active_futures = {}
+                for driver in drivers:
+                    if not url_queue.empty():
+                        url = url_queue.get()
+                        future = executor.submit(scrape, [url], driver, cycle, detailed_folders)
+                        active_futures[future] = driver
 
-                for future, start_time, url in processes:
-                    future.result()
+                while active_futures:
+                    for future in as_completed(active_futures.keys()):
+                        driver = active_futures.pop(future)
+                        try:
+                            future.result()
+                            logging.info("Driver finished scrape")
+                        except Exception as e:
+                            logging.error("Error during scraping: %s", e)
+
+                        if not url_queue.empty():
+                            next_url = url_queue.get()
+                            new_future = executor.submit(scrape, [next_url], driver, cycle, detailed_folders)
+                            active_futures[new_future] = driver
 
                 cycle_duration = time.time() - cycle_start_time
                 if cycle < cycles - 1:
                     sleep_time = max(0, time_between_cycles - cycle_duration)
+                    logging.info("Cycle %d complete. Sleeping for %.2f seconds.", cycle + 1, sleep_time)
                     time.sleep(sleep_time)
+
         finally:
             for driver in drivers:
-                driver.quit()
+                if driver:
+                    driver.quit()
 
 
 def load_urls_from_file(filename):
