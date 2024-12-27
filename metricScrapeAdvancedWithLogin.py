@@ -1,5 +1,9 @@
+import logging
 import traceback
 import time
+
+from selenium.common import TimeoutException
+
 from commonMethods import *
 from datetime import datetime
 import shutil
@@ -81,6 +85,15 @@ def get_all_posts(driver, replies_to_url, replies_sorted, quote_to, seen_urls) -
     while cycles_since_new_found < 30:
         html_source = driver.page_source
         soup = BeautifulSoup(html_source, 'html.parser')
+
+        try:
+            wait_until_loaded(driver, '//*[@aria-label="Home timeline"]', 10)
+        except TimeoutException:
+            print("Failed to load home timeline")
+            driver.refresh()
+            time.sleep(60)
+            continue
+
         posts_parent = soup.find(attrs={"aria-label": "Timeline: Conversation"}).find()
 
         for current_element in posts_parent.find_all(recursive=False):
@@ -106,10 +119,7 @@ def get_all_posts(driver, replies_to_url, replies_sorted, quote_to, seen_urls) -
                 try:
                     metrics_element, href_element = get_metrics_and_href_element(current_element)
                     href = href_element.get("href")
-
-                    if href.endswith('/analytics'):
-                        href = href[:-len('/analytics')]
-                    url = "https://x.com" + href
+                    url = "https://x.com" + normalize_href(href)
                     user_url = extract_post_poster(url)
                     data = metrics_element.get("aria-label")
                     reply_count, repost_count, like_count, bookmark_count, view_count = get_metrics(data)
@@ -143,7 +153,11 @@ def get_all_posts(driver, replies_to_url, replies_sorted, quote_to, seen_urls) -
                         print("found replies: " + str(len(unique_replies)))
                         return og_tweet, unique_replies, seen_urls
             except Exception as e:
-                pass
+                logging.error(f"failed to process reply\n"
+                              f"{e}"
+                              f"{traceback.format_exc()}")
+                continue
+
 
         cycles_since_new_found += 1
         print("no new found, scrolling")
@@ -177,7 +191,7 @@ def get_all_quote_urls(driver, url):
                     href = href_element.get("href")
                     data = metrics_element.get("aria-label")
                     reply_count, repost_count, like_count, bookmark_count, view_count = get_metrics(data)
-                    url = "https://x.com" + '/'.join(href.split("/")[:-1])
+                    url = "https://x.com" + normalize_href(href)
 
                     if url not in urls:
                         cycles_since_new_found = 0
@@ -185,10 +199,7 @@ def get_all_quote_urls(driver, url):
                         if reply_count > 0:
                             urls.add(url)
                 except Exception as e:
-                    print(e)
-                    traceback.print_exc()
-                    time.sleep(10)
-                    pass
+                    continue
 
             cycles_since_new_found += 1
             print("no new found, scrolling")
@@ -208,7 +219,12 @@ def get_metrics_and_href_element(parent_element):
     metrics_element = parent_element.find(attrs={"role": "group"})
     if metrics_element is None:
         raise Exception("Metrics element not found")
-    href_element = parent_element.find(lambda tag: tag.get("role") == "link" and re.match(r"^/[^/]+/status/\d+$", tag.get("href", "")) and (tag.has_attr("aria-describedby") or tag.has_attr("aria-label")))
+    href_element = parent_element.find(
+        lambda tag: tag.get("role") == "link"
+                    and re.match(r".*/status/\d+.*", tag.get("href", ""))
+                    and (tag.has_attr("aria-describedby") or tag.has_attr("aria-label"))
+    )
+
     if href_element is None:
         raise Exception("Href element not found")
     return metrics_element, href_element

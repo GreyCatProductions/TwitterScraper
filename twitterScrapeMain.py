@@ -17,70 +17,101 @@ logging.basicConfig(
 #endregion
 
 def scrape(urls, driver, cycle, detailed_folders):
-    def process_tweet_and_replies(url: str, is_root: bool, quote_to: str, extendable_path: str, depth: int = 0, seen_urls: set = set(), users: set = set()): #used by process replies and process quotes
+    def process_tweet_and_replies(
+            url: str,
+            is_root: bool,
+            quote_to: str,
+            extendable_path: str,
+            depth: int = 0,
+            seen_urls: set = set(),
+            users: set = set(),
+            total_replies_processed: int = 0):
+
         retries_left = 10 if is_root else 3
 
         while retries_left > 0:
             try:
-                total_replies_found: int = 0
-                tweet, replies,seen_urls = get_tweets(url, driver, is_root, quote_to, seen_urls, hour_final_path)
+                total_replies_found = 0
+
+                tweet, replies, seen_urls = get_tweets(url, driver, is_root, quote_to, seen_urls, hour_final_path)
 
                 if tweet is None:
-                    print("Failed to fetch tweet" + url)
-                    return 0, 0, users
+                    print(f"Failed to scrape tweet: {url}")
+                    return 0, 0, users, total_replies_processed
 
-                try:
-                    if len(replies) > 0:
+                if replies:
+                    try:
                         save_tweets(replies, total_csv_path)
-                except Exception as e:
-                    print("SAVING FAILED!!!")
-                    logging.error(e)
+                    except Exception as save_error:
+                        print("Error while saving replies!")
+                        logging.error(save_error)
 
                 if is_root:
                     total_replies_found += tweet.reply_count
                     users.add(tweet.user_url)
+
                     file_path_og_post = os.path.join(dir_path, "og_post.csv")
                     save_tweets([tweet], total_csv_path)
                     if detailed_folders:
                         save_tweets([tweet], file_path_og_post)
 
-                replies_found_with_spread = len(replies)
+                replies_with_spread = len(replies)
 
                 for i, reply in enumerate(replies):
-                    if reply is None:
-                        continue
-
                     reply_dir = os.path.join(extendable_path, str(extract_post_id(reply.url)))
-
                     if detailed_folders:
                         os.makedirs(reply_dir, exist_ok=True)
                         reply_post_path = os.path.join(reply_dir, "reply.csv")
                         save_tweets([reply], reply_post_path)
 
                     if is_root and i % 5 == 0 and i != 0:
+                        elapsed_time = time.time() - start_time
+                        avg_time_per_first_layer_reply = elapsed_time / i
+                        avg_time_per_reply = elapsed_time / total_replies_processed
                         logging.info(
-                            "---Progress Report for Root URL: %s---\nTotal replies processed: %d\nFirst Layer Replies Processed: %d/%d\nReplies With Spread found: %d\nTime Spent: %.2f seconds\nAverage time to process first layer reply spread: %.2f seconds\n",
-                            url, total_replies_found, i, len(replies), replies_found_with_spread, time.time() - start_time, (time.time() - start_time) / i)
+                            f"--- Progress Report for Root URL: {url} ---\n"
+                            f"Total replies: {total_replies_found}\n"
+                            f"Replies processed: {total_replies_processed}\n"
+                            f"First Layer Replies Processed: {i}/{len(replies)}\n"
+                            f"Replies With Spread Found: {replies_with_spread}\n"
+                            f"Time Spent: {elapsed_time:.2f} seconds\n"
+                            f"Avg Time Per Reply (First Layer): {avg_time_per_first_layer_reply:.2f} seconds\n"
+                            f"Avg Time Per Reply (All layers): {avg_time_per_reply:.2f} seconds\n")
 
                     if reply.reply_count > 0:
                         try:
+                            total_replies_processed += 1
                             users.add(reply.user_url)
-                            sub_replies, sub_spread, sub_users = process_tweet_and_replies(reply.url, False, "", reply_dir, depth + 1, seen_urls, users)
+
+                            sub_replies, sub_spread, sub_users, sub_processed = process_tweet_and_replies(
+                                url=reply.url,
+                                is_root=False,
+                                quote_to="",
+                                extendable_path=reply_dir,
+                                depth=depth + 1,
+                                seen_urls=seen_urls,
+                                users=users,
+                                total_replies_processed=total_replies_processed
+                            )
+
                             users.update(sub_users)
-                            replies_found_with_spread += sub_spread
+                            replies_with_spread += sub_spread
                             total_replies_found += reply.reply_count + sub_replies
-                        except Exception as e:
-                            print("failed to process reply: " + reply.url)
-                            print(e)
+                            total_replies_processed = sub_processed
+                        except Exception as sub_error:
+                            print(f"Failed to process reply: {reply.url}")
+                            print(sub_error)
                             continue
-                return total_replies_found, replies_found_with_spread, users
-            except Exception as e:
-                print("failed to scrape tweet: " + url)
-                print(e)
+                return total_replies_found, replies_with_spread, users, total_replies_processed
+
+            except Exception as main_error:
+                print(f"Failed to scrape tweet: {url}")
+                print(main_error)
                 driver.refresh()
                 time.sleep(10)
                 retries_left -= 1
-        return 0, 0, users
+
+        return 0, 0, users, total_replies_processed
 
     for url in urls:
         try:
@@ -92,11 +123,16 @@ def scrape(urls, driver, cycle, detailed_folders):
             os.makedirs(dir_path, exist_ok=True)
 
             def process_replies():
-                replies_total, replies_with_spread_total, user_urls = process_tweet_and_replies(url, True, "", dir_path)
+                replies_total, replies_with_spread_total, user_urls, tweets_processed = process_tweet_and_replies(url, True, "", dir_path)
                 if replies_total != -1:
                     logging.info(
-                        "---------- Reply scrape successfully done for URL: %s (Phase 1 / 4) ----------\ntime needed: %.2f\ntotal replies: %d\nreplies with spread: %d\namount_of unique users: %d",
-                        url, time.time() - start_time, replies_total, replies_with_spread_total, len(user_urls))
+                        "---------- Reply scrape successfully done for URL: %s (Phase 1 / 4) ----------\n"
+                        "time needed: %.2f\n"
+                        "total replies (all layers): %d\n"
+                        "tweets processed: %d\n"
+                        "replies with spread: %d\n"
+                        "amount_of unique users: %d",
+                        url, time.time() - start_time, replies_total, tweets_processed, replies_with_spread_total, len(user_urls))
                 else:
                     logging.info("---------- FAILED to get replies for URL: %s ----------", url)
                     return None
@@ -106,32 +142,39 @@ def scrape(urls, driver, cycle, detailed_folders):
             replies_failed = user_urls is None
 
             def process_quotes():
-                # getting quotes
                 getting_quotes_start_time = time.time()
                 quote_urls_with_spread, total_quotes_count = get_all_quote_urls(driver, url)
                 if quote_urls_with_spread != -1:
                     logging.info(
-                        "---------- Getting all quotes successfully done for URL: %s (Phase 2 / 4) ----------\ntotal time: %.2f\ntime needed: %.2f\ntotal quotes found: %d \nquotes with spread found: %d",
+                        "---------- Getting all quotes successfully done for URL: %s (Phase 2 / 4) ----------\n"
+                        "total time: %.2f\n"
+                        "time needed: %.2f\n"
+                        "total quotes found: %d \nq"
+                        "quotes with spread found: %d",
                         url, time.time() - start_time, time.time() - getting_quotes_start_time, total_quotes_count,
                         len(quote_urls_with_spread))
                 else:
                     logging.info("---------- FAILED to get quotes for URL: %s ----------", url)
                     return
 
-                # processing quotes
                 processing_quotes_start_time = time.time()
-                quote_replies_total, quotes_spread_total = 0, 0
+                quote_replies_total = quotes_spread_total = quote_tweets_processed_total = 0
                 for quote_url in quote_urls_with_spread:
-                    quote_replies, quotes_with_spread, quote_users = process_tweet_and_replies(quote_url, True, url,
-                                                                                               dir_path)
+                    quote_replies, quotes_with_spread, quote_users, quote_tweets_processed = process_tweet_and_replies(quote_url, True, url, dir_path)
                     quote_replies_total += quote_replies
                     quotes_spread_total += quotes_with_spread
+                    quote_tweets_processed_total += quote_tweets_processed
 
                 if quote_replies_total != -1:
                     logging.info(
-                        "---------- Quote scrape successfully done for URL: %s (Phase 3 / 4) ----------\ntotal time: %.2f\ntime needed: %.2f\ntotal replies in quotes: %d\nreplies in quotes with spread: %d",
+                        "---------- Quote scrape successfully done for URL: %s (Phase 3 / 4) ----------\n"
+                        "total time: %.2f\n"
+                        "time needed: %.2f\n"
+                        "total replies in quotes: %d\n"
+                        "total quote replies processed: %d\n"
+                        "replies in quotes with spread: %d",
                         url, time.time() - start_time, time.time() - processing_quotes_start_time,
-                        quote_replies_total, quotes_spread_total)
+                        quote_replies_total, quote_tweets_processed_total, quotes_spread_total)
                 else:
                     logging.info("---------- FAILED to process quotes for URL: %s ----------", url)
             process_quotes()
@@ -140,16 +183,21 @@ def scrape(urls, driver, cycle, detailed_folders):
                 def process_users(user_urls: set):
                     users_path = os.path.join(dir_path, "users.csv")
                     user_stuff_start_time = time.time()
+                    amount_of_users_successfully_processed = 0
                     for user_url in user_urls:
                         user = get_user_stats(driver, user_url)
                         if not user:
                             print("failed to get user: " + user_url)
                             continue
+                        amount_of_users_successfully_processed += 1
                         save_users([user], users_path)
 
                     logging.info(
-                        "---------- Processing users successfully done for URL: %s (Phase 4 / 4) ----------\ntotal time: %.2f\ntime needed: %.2f",
-                        url, time.time() - start_time, time.time() - user_stuff_start_time)
+                        "---------- Processing users successfully done for URL: %s (Phase 4 / 4) ----------\n"
+                        "total time: %.2f\n"
+                        "time needed: %.2f\n"
+                        "users expected/processed: %d / %d",
+                        url, time.time() - start_time, time.time() - user_stuff_start_time, len(user_urls), amount_of_users_successfully_processed)
                 process_users(user_urls)
 
             logging.info(
@@ -162,7 +210,7 @@ def create_driver():
     geckodriver_path = os.path.join(os.getcwd(), 'geckodriver.exe')
     service = Service(geckodriver_path)
     options = Options()
-    #options.add_argument("--headless")
+    options.add_argument("--headless")
     driver = webdriver.Firefox(service=service, options=options)
     driver.set_page_load_timeout(10)
     driver.maximize_window()
@@ -275,25 +323,27 @@ def hourly_scrape(url_holder, cycles, time_between_cycles, detailed_folders):
                 cycle_start_time = time.time()
 
                 active_futures = {}
-                for driver in drivers:
+                for driver_idx, driver in enumerate(drivers):
                     if not url_queue.empty():
                         url = url_queue.get()
+                        logging.info("Driver %d starting to scrape URL: %s in Cycle %d", driver_idx + 1, url, cycle + 1)
                         future = executor.submit(scrape, [url], driver, cycle, detailed_folders)
-                        active_futures[future] = driver
+                        active_futures[future] = (driver, driver_idx + 1, url)
 
                 while active_futures:
                     for future in as_completed(active_futures.keys()):
-                        driver = active_futures.pop(future)
+                        driver, driver_idx, url = active_futures.pop(future)
                         try:
                             future.result()
-                            logging.info("Driver finished scrape")
+                            logging.info("Driver %d finished scraping URL: %s in Cycle %d", driver_idx, url, cycle + 1)
                         except Exception as e:
-                            logging.error("Error during scraping: %s", e)
+                            logging.error("Driver %d encountered an error while scraping URL: %s in Cycle %d. Error: %s", driver_idx, url, cycle + 1, e)
 
                         if not url_queue.empty():
                             next_url = url_queue.get()
+                            logging.info("Driver %d starting to scrape next URL: %s in Cycle %d", driver_idx, next_url, cycle + 1)
                             new_future = executor.submit(scrape, [next_url], driver, cycle, detailed_folders)
-                            active_futures[new_future] = driver
+                            active_futures[new_future] = (driver, driver_idx, next_url)
 
                 cycle_duration = time.time() - cycle_start_time
                 if cycle < cycles - 1:

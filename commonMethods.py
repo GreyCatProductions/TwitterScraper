@@ -8,6 +8,15 @@ import csv
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
+import re
+
+
+def normalize_href(href):
+    match = re.search(r"^/([^/]+)/status/(\d+)", href)
+    if match:
+        username, status_id = match.groups()
+        return f"/{username}/status/{status_id}"
+    return None
 
 def extract_count(soup: BeautifulSoup, metric_name: str) -> int:
     data = soup.find(string=re.compile(metric_name))
@@ -30,6 +39,11 @@ def extract_count(soup: BeautifulSoup, metric_name: str) -> int:
     else:
         print("FAILED TO GET DATA!")
     return -1
+
+def wait_until_loaded(driver, x_path, time_to_wait):
+    WebDriverWait(driver, time_to_wait).until(
+        EC.presence_of_element_located((By.XPATH, x_path))
+    )
 
 def extract_post_id(url: str) -> int:
     return int(urlparse(url).path.split('/')[-1])
@@ -75,7 +89,6 @@ def save_users(users, path):
         for user in users:
             url, description, following_count, followers_count, posts_amount = user.get_stats()
             writer.writerow([url, description, following_count, followers_count, posts_amount])
-
 
 def get_metrics(data_text: str) -> tuple: #expects data.get('aria label'....)
     replies_match = re.search(r"(\d+)\s+replies", data_text)
