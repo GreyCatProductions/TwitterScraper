@@ -15,8 +15,7 @@ def get_tweets(url, driver, sorting_needed, quote_to, seen_urls, hour_final_path
     print("Scraping: " + str(url))
 
     if not check_if_page_exists(driver):
-        return None, None, None
-
+        return None, None, seen_urls
     retries = 5
     request_block = True
     while retries > 0 and request_block:
@@ -35,7 +34,7 @@ def get_tweets(url, driver, sorting_needed, quote_to, seen_urls, hour_final_path
         sorting_successfull = click_sort_by_likes_button(driver) #makes twitter replies sorted by likes,
         if not sorting_successfull:
             print("FAILED TO SORT REPLIES!!!")
-            return None, None
+            return None, None, seen_urls
 
     tweet, unique_replies, seen_urls = get_all_posts(driver, url, sorting_needed, quote_to, seen_urls)
 
@@ -259,6 +258,7 @@ def click_sort_by_likes_button(driver):
             driver.refresh()
             print("Sort failed, refreshing and waiting a minute")
             time.sleep(60)
+    return False
 
 def scroll(driver, y_range):
     current_scroll = driver.execute_script("return window.scrollY;")

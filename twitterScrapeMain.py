@@ -1,11 +1,12 @@
+from time import sleep
+
 from metricScrapeNoLogin import *
 from metricScrapeAdvancedWithLogin import *
 from user_scrape import *
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 import time
 import logging
-
-from queue import Queue
+import queue
 
 #region logging
 logging.basicConfig(
@@ -210,7 +211,7 @@ def create_driver():
     geckodriver_path = os.path.join(os.getcwd(), 'geckodriver.exe')
     service = Service(geckodriver_path)
     options = Options()
-    options.add_argument("--headless")
+    #options.add_argument("--headless")
     driver = webdriver.Firefox(service=service, options=options)
     driver.set_page_load_timeout(10)
     driver.maximize_window()
@@ -305,60 +306,55 @@ def login_all_drivers(drivers):
         for future in futures:
             future.result()
 
-def hourly_scrape(url_holder, cycles, time_between_cycles, detailed_folders):
-    urls = load_urls_from_file(url_holder)
-    url_queue = Queue()
-    for url in urls:
+def scraper_task(driver, url_queue, cycle, detailed_folders):
+    while not url_queue.empty():
+        try:
+            url = url_queue.get_nowait()
+        except:
+            break
+
+        try:
+            scrape([url], driver, cycle, detailed_folders)
+        finally:
+            url_queue.task_done()
+
+
+def execute_scraping(cycle, urls_to_scrape, detailed_folders):
+    url_queue = queue.Queue()
+    for url in urls_to_scrape:
         url_queue.put(url)
 
+    print(url_queue)
+
     with ThreadPoolExecutor(max_workers=2) as executor:
-        try:
-            drivers = [create_driver() for _ in range(2)]
-            print("Logging in all drivers...")
-            login_all_drivers(drivers)
-            print("All drivers logged in successfully.")
-
-            for cycle in range(cycles):
-                logging.info("Cycle %d/%d starting", cycle + 1, cycles)
-                cycle_start_time = time.time()
-
-                active_futures = {}
-                for driver_idx, driver in enumerate(drivers):
-                    if not url_queue.empty():
-                        url = url_queue.get()
-                        logging.info("Driver %d starting to scrape URL: %s in Cycle %d", driver_idx + 1, url, cycle + 1)
-                        future = executor.submit(scrape, [url], driver, cycle, detailed_folders)
-                        active_futures[future] = (driver, driver_idx + 1, url)
-
-                while active_futures:
-                    for future in as_completed(active_futures.keys()):
-                        driver, driver_idx, url = active_futures.pop(future)
-                        try:
-                            future.result()
-                            logging.info("Driver %d finished scraping URL: %s in Cycle %d", driver_idx, url, cycle + 1)
-                        except Exception as e:
-                            logging.error("Driver %d encountered an error while scraping URL: %s in Cycle %d. Error: %s", driver_idx, url, cycle + 1, e)
-
-                        if not url_queue.empty():
-                            next_url = url_queue.get()
-                            logging.info("Driver %d starting to scrape next URL: %s in Cycle %d", driver_idx, next_url, cycle + 1)
-                            new_future = executor.submit(scrape, [next_url], driver, cycle, detailed_folders)
-                            active_futures[new_future] = (driver, driver_idx, next_url)
-
-                cycle_duration = time.time() - cycle_start_time
-                if cycle < cycles - 1:
-                    sleep_time = max(0, time_between_cycles - cycle_duration)
-                    logging.info("Cycle %d complete. Sleeping for %.2f seconds.", cycle + 1, sleep_time)
-                    time.sleep(sleep_time)
-
-        finally:
-            for driver in drivers:
-                if driver:
-                    driver.quit()
+        executor.submit(scraper_task, driver1, url_queue, cycle, detailed_folders)
+        executor.submit(scraper_task, driver2, url_queue, cycle, detailed_folders)
+    url_queue.join()
 
 
 def load_urls_from_file(filename):
     with open(filename, 'r') as file:
         return [line.strip() for line in file if line.strip()]
 
-hourly_scrape("urls_to_scrape", 24, 3600, False)
+driver1 = create_driver()
+driver2 = create_driver()
+try:
+    login_all_drivers([driver1, driver2])
+
+    cycle = 0
+    max_cycles = 24
+    while cycle < max_cycles:
+        urls_to_scrape = load_urls_from_file('urls_to_scrape')
+        print(urls_to_scrape)
+        print(f"Starting scrape cycle {cycle}")
+        start_time = time.time()
+        execute_scraping(cycle, urls_to_scrape, False)
+        time_needed = time.time() - start_time
+        time_to_sleep = max(3600 - time_needed, 0)
+        print(f"Cycle {cycle} completed in {time_needed} seconds. Waiting for {time_to_sleep}...")
+        sleep(time_to_sleep)
+        cycle += 1
+finally:
+    driver1.quit()
+    driver2.quit()
+
