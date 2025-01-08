@@ -1,9 +1,11 @@
-from bs4 import Tag, NavigableString
+from bs4 import Tag, NavigableString, BeautifulSoup
 import time
 
 from selenium.common import TimeoutException
 
-from commonMethods import *
+from Functions.Helpers.common_scrape_functions import wait_until_loaded
+from Objects.User import User
+
 
 def get_user_stats(driver, user_url: str):  # Expects logged in and open driver
     max_retries = 5
