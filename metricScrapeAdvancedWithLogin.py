@@ -141,7 +141,7 @@ def get_all_posts(driver, replies_to_url, replies_sorted, quote_to, seen_urls) -
                 if url not in seen_urls:
                     cycles_since_new_found = 0
                     #process unique reply
-                    if not reply_count == 0:
+                    if reply_count > 3:
                         print("Found reply " + url)
                         unique_replies.append(Tweet(reply_count, repost_count, like_count, bookmark_count, view_count, replies_to_url, url, time_stamp, "", user_url))
                         print("current replies: " + str(len(unique_replies)))

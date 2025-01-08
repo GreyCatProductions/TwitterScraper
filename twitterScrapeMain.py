@@ -211,7 +211,7 @@ def create_driver():
     geckodriver_path = os.path.join(os.getcwd(), 'geckodriver.exe')
     service = Service(geckodriver_path)
     options = Options()
-    #options.add_argument("--headless")
+    options.add_argument("--headless")
     driver = webdriver.Firefox(service=service, options=options)
     driver.set_page_load_timeout(10)
     driver.maximize_window()
@@ -323,8 +323,6 @@ def execute_scraping(cycle, urls_to_scrape, detailed_folders):
     url_queue = queue.Queue()
     for url in urls_to_scrape:
         url_queue.put(url)
-
-    print(url_queue)
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         executor.submit(scraper_task, driver1, url_queue, cycle, detailed_folders)
