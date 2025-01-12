@@ -1,6 +1,4 @@
-from selenium.webdriver.firefox.webdriver import WebDriver
-
-from metricScrapeAdvancedWithLogin import *
+from reply_scrape import *
 from Helpers.saver import *
 from quote_scrape import *
 from user_scrape import *
@@ -24,13 +22,13 @@ def scrape(urls: list[str], driver: WebDriver, cycle: int, detailed_folders: boo
             os.makedirs(hour_path, exist_ok=True)
 
             user_urls = process_replies(driver, total_csv_path, hour_path, detailed_folders, start_time, url)
-            replies_processed_successfully = len(user_urls) == 0
+            replies_processed_successfully = len(user_urls) >= 1
 
             quotes_processes_successfully = process_quotes(driver, total_csv_path, hour_path, detailed_folders, start_time, url)
 
             users_processed_successfully = 0
-            if not replies_processed_successfully:
-                users_processed_successfully = process_users(user_urls)
+            if replies_processed_successfully:
+                users_processed_successfully = process_users(driver, hour_path, start_time, url, user_urls)
 
             logging.info(
                 f"---------- FINISHED SCRAPING URL: {url} ----------\n"
@@ -40,8 +38,10 @@ def scrape(urls: list[str], driver: WebDriver, cycle: int, detailed_folders: boo
                 f"users processed successfully: {users_processed_successfully} / {len(user_urls)}\n")
         except Exception as e:
             logging.error("Failed to process URL: %s", url, exc_info=True)
+            logging.error(e)
+    driver.get("https://www.peta.de/wp-content/uploads/2022/12/katzen-cat-6568422_1280-c-pixabay.jpg")
 
-def process_replies(driver:WebDriver, total_csv_path: str, hour_path: str, detailed_folders: bool, start_time: float, url: str) -> list[str]:
+def process_replies(driver:WebDriver, total_csv_path: str, hour_path: str, detailed_folders: bool, start_time: float, url: str) -> set[str]:
     replies_total, replies_with_spread_total, user_urls, tweets_processed = process_tweet_and_its_replies(
         driver=driver,
         total_csv_path=total_csv_path,
@@ -68,7 +68,7 @@ def process_replies(driver:WebDriver, total_csv_path: str, hour_path: str, detai
             url, time.time() - start_time, replies_total, tweets_processed, replies_with_spread_total, len(user_urls))
     else:
         logging.info("---------- FAILED to get replies for URL: %s ----------", url)
-        return []
+        return set()
 
     return user_urls
 
@@ -147,20 +147,19 @@ def process_tweet_and_its_replies(
     while retries_left > 0:
         try:
             total_replies_found = 0
+            tweet: Tweet
+            replies: list[Tweet]
 
-            tweet, replies, seen_urls = get_tweets(url_to_process, driver, is_root, quote_to_url, seen_urls,
-                                                   hour_final_path)
+            try:
+                new_seen_urls: set[str]
+                tweet, replies, new_seen_urls = get_tweet_and_replies(url_to_process, driver, is_root, quote_to_url, seen_urls, hour_final_path)
+                seen_urls.update(new_seen_urls)
+            except Exception as e:
+                raise Exception(f"Failed to process tweet {url_to_process}: {e}")
 
-            if tweet is None:
-                print(f"Failed to scrape tweet: {url_to_process}")
-                return 0, 0, users, total_replies_processed
 
             if replies:
-                try:
-                    save_tweets(replies, total_csv_path)
-                except Exception as save_error:
-                    print("Error while saving replies!")
-                    logging.error(save_error)
+                save_tweets(replies, total_csv_path)
 
             if is_root:
                 total_replies_found += tweet.reply_count
@@ -175,6 +174,9 @@ def process_tweet_and_its_replies(
 
             for i, reply in enumerate(replies):
                 reply_dir = os.path.join(extendable_path, str(extract_post_id(reply.url)))
+
+                tweet.add_indirect_counts(reply.reply_count, reply.repost_count, reply.like_count, reply.bookmark_count, reply.view_count)
+
                 if detailed_folders:
                     os.makedirs(reply_dir, exist_ok=True)
                     reply_post_path = os.path.join(reply_dir, "reply.csv")

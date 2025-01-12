@@ -1,9 +1,6 @@
 import logging
 import traceback
-import time
-
-from bs4 import NavigableString
-from selenium.common import TimeoutException
+from selenium.common import TimeoutException, NoSuchElementException
 from selenium.webdriver.firefox.webdriver import WebDriver
 
 from Functions.Helpers.common_scrape_functions import *
@@ -14,14 +11,15 @@ import shutil
 from Objects.Tweet import Tweet
 
 
-def get_tweets(url, driver, sorting_needed, quote_to, seen_urls, hour_final_path): #login before using this function needed
+def get_tweet_and_replies(url: str, driver: WebDriver, sorting_needed: bool, quote_to: str, seen_urls: set[str], hour_final_path: str) -> tuple[Tweet, set[str], set[str]]: #login before using this function needed
     time.sleep(1)
     driver.get(url)
     time.sleep(1)
     print("Scraping: " + str(url))
 
     if not check_if_page_exists(driver):
-        return None, None, seen_urls
+        raise Exception("Page does not exist")
+
     retries = 5
     request_block = True
     while retries > 0 and request_block:
@@ -31,16 +29,15 @@ def get_tweets(url, driver, sorting_needed, quote_to, seen_urls, hour_final_path
             time.sleep(30)
             driver.refresh()
             retries -= 1
-        except Exception:
+        except TimeoutException or NoSuchElementException:
             request_block = False
 
     screenshot_save_path = make_and_save_screenshot(driver, hour_final_path)
 
     if sorting_needed:
-        sorting_successfull = click_sort_by_likes_button(driver) #makes twitter replies sorted by likes,
-        if not sorting_successfull:
-            print("FAILED TO SORT REPLIES!!!")
-            return None, None, seen_urls
+        sorting_successful = click_sort_by_likes_button(driver) #makes Twitter replies sorted by likes,
+        if not sorting_successful:
+            raise Exception("Sort failed")
 
     tweet, unique_replies, seen_urls = get_all_posts(driver, url, sorting_needed, quote_to, seen_urls)
 
@@ -74,7 +71,7 @@ def get_all_posts(driver: WebDriver, replies_to_url: str, replies_sorted: bool, 
         for current_element in posts_parent.find_all(recursive=False):
             try:
                 if og_tweet is not None:
-                    if is_ad(soup, current_element): #nicht ganz klar hier
+                    if is_ad(soup, current_element):
                         print("ad found, skipping")
                         continue
 
@@ -145,7 +142,7 @@ def get_all_posts(driver: WebDriver, replies_to_url: str, replies_sorted: bool, 
     print("found replies: " + str(len(unique_replies)))
     return og_tweet, unique_replies, seen_urls
 
-def is_valid_reply(current_element: NavigableString) -> bool:
+def is_valid_reply(current_element) -> bool:
     sibling = current_element.find_previous_sibling()
     if sibling:
         first_child = sibling.contents[0] if sibling.contents else None
@@ -153,24 +150,31 @@ def is_valid_reply(current_element: NavigableString) -> bool:
             return not any(list(first_child.children))
     return True
 
-def is_spam_button(current_element: NavigableString) -> bool:
-    try:
-        element = current_element.find().find().find()
-        if element and element.name == "button":
-            return "Show probable spam" in element.text
-        else:
-            return False
-    except Exception as e:
-        return False
+def is_spam_button(current_element) -> bool:
+    element = current_element.find()
+    if element:
+        element = element.find()
+    if element:
+        element = element.find()
+    if element and element.name == "button":
+        return "Show probable spam" in element.text
+    return False
 
 def is_additional_replies_button(current_element):
-    try:
-        text_element = current_element.find().find().find().find().find().contents[1].find().find().find().find().find()
-        if "Show additional replies, including those that may contain offensive content" in text_element.text and text_element.name == "span":
-            return True
+    for i in range(5):
+        current_element = current_element.find()
+        if not current_element:
+            return False
+
+    current_element = current_element.contents[1]
+    if not current_element:
         return False
-    except:
-        return False
+
+    for i in range(5):
+        current_element = current_element.find()
+        if not current_element:
+            return False
+
 
 def is_ad(soup: BeautifulSoup, current_element):
     if current_element.find(string="Ad") and soup.find(attrs={"data-testid": "placementTracking"}):
@@ -180,16 +184,16 @@ def is_ad(soup: BeautifulSoup, current_element):
 
 def click_sort_by_likes_button(driver):
     def scroll_until_appears():
-        tries = 10
+        tries_left = 10
 
-        while tries > 0:
+        while tries_left > 0:
             try:
-                button = driver.find_element(By.XPATH, '//button[@aria-label="Reply"]')
-                sort_button = button.find_element(By.XPATH, './following-sibling::*[1]')
-                return sort_button
-            except:
+                reply_button = driver.find_element(By.XPATH, '//button[@aria-label="Reply"]')
+                sort_button_to_click = reply_button.find_element(By.XPATH, './following-sibling::*[1]')
+                return sort_button_to_click
+            except NoSuchElementException:
                 scroll(driver, 400)
-                tries -= 1
+                tries_left -= 1
                 time.sleep(1)
     tries = 3
     while tries > 0:
@@ -203,7 +207,7 @@ def click_sort_by_likes_button(driver):
             likes_button.click()
             time.sleep(1)
             return True
-        except Exception:
+        except TimeoutException:
             tries -= 1
             driver.refresh()
             print("Sort failed, refreshing and waiting a minute")

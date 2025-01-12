@@ -1,9 +1,7 @@
-import os
+from concurrent.futures import ThreadPoolExecutor
 import time
-
 from selenium.webdriver.common.by import By
 from selenium.webdriver.firefox import webdriver
-from concurrent.futures import ThreadPoolExecutor
 from selenium.webdriver.firefox.options import Options
 from selenium.webdriver.firefox.service import Service
 from selenium import webdriver
@@ -19,8 +17,7 @@ def create_drivers(amount: int, headless: bool) -> list[WebDriver]:
     return drivers
 
 def create_driver(headless: bool) -> WebDriver:
-    geckodriver_path = os.path.join(os.getcwd(), 'geckodriver.exe')
-    service = Service(geckodriver_path)
+    service = Service()
     options = Options()
     if headless:
         options.add_argument("--headless")
@@ -95,26 +92,40 @@ def login_all_drivers(drivers):
 
         unfiltered_data = read_login_data()
 
-        login_data = [
-            {
-                'username': unfiltered_data.get('username1'),
-                'password': unfiltered_data.get('password1')
-            },
-            {
-                'username': unfiltered_data.get('username2'),
-                'password': unfiltered_data.get('password2')
-            }
-        ]
+        login_data = []
+        i = 1
+        while True:
+            username_key = f'username{i}'
+            password_key = f'password{i}'
+            if username_key in unfiltered_data and password_key in unfiltered_data:
+                login_data.append({
+                    'username': unfiltered_data[username_key],
+                    'password': unfiltered_data[password_key]
+                })
+                i += 1
+            else:
+                break
+
+        if not login_data:
+            raise ValueError("No valid login data found in the login_data.txt file.")
 
         for data in login_data:
-            if not data['password'] or not data['username']:
-                raise ValueError("Username, password, or email is missing in the login_data.txt file.")
+            if not data['username'] or not data['password']:
+                raise ValueError(f"Username or password is missing for a login entry.")
+
         return login_data
 
     logins = get_login_data()
 
+    if len(logins) < len(drivers):
+        raise ValueError(
+            f"Insufficient login data: {len(logins)} logins provided, but {len(drivers)} drivers require logins.")
+
     with ThreadPoolExecutor() as executor:
-        futures = [executor.submit(login, driver, logins[i]['username'], logins[i]['password']) for i, driver in enumerate(drivers)]
+        futures = [
+            executor.submit(login, driver, logins[i]['username'], logins[i]['password'])
+            for i, driver in enumerate(drivers)
+        ]
         for future in futures:
             future.result()
 
