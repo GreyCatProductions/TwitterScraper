@@ -175,8 +175,6 @@ def process_tweet_and_its_replies(
             for i, reply in enumerate(replies):
                 reply_dir = os.path.join(extendable_path, str(extract_post_id(reply.url)))
 
-                tweet.add_indirect_counts(reply.reply_count, reply.repost_count, reply.like_count, reply.bookmark_count, reply.view_count)
-
                 if detailed_folders:
                     os.makedirs(reply_dir, exist_ok=True)
                     reply_post_path = os.path.join(reply_dir, "reply.csv")

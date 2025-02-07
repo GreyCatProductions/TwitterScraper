@@ -18,13 +18,3 @@ class Tweet:
 
     def get_direct_stats(self):
         return self.reply_count, self.repost_count, self.like_count, self.bookmark_count, self.view_count, self.reply_to_url, self.url, self.time_stamp, self.quote_to_url, self.user_url
-
-    def add_indirect_counts(self, indirect_reply_count: int, indirect_repost_count: int, indirect_like_count: int, indirect_bookmark_count: int, indirect_view_count: int):
-        self.indirect_reply_count += indirect_reply_count
-        self.indirect_repost_count += indirect_repost_count
-        self.indirect_like_count += indirect_like_count
-        self.indirect_bookmark_count += indirect_bookmark_count
-        self.indirect_view_count += indirect_view_count
-
-    def get_indirect_counts(self):
-        return self.indirect_reply_count, self.indirect_repost_count, self.indirect_like_count, self.indirect_bookmark_count, self.indirect_view_count, self.indirect_view_count

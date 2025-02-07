@@ -44,11 +44,16 @@ def main(cycles_to_do: int, detailed_folders: bool, amount_of_drivers_to_create:
             execute_scraping(drivers, urls_to_scrape, cycle, detailed_folders)
             time_needed = time.time() - start_time
 
-            time_to_sleep = max(3600 - time_needed, 0)
+            time_to_sleep = max(3600 - time_needed - 60, 60)
 
             print(f"Cycle {cycle} completed in {time_needed} seconds. Waiting for {time_to_sleep}...")
 
             sleep(time_to_sleep)
+
+            print(f"Starting in 60 seconds! Do not edit urls_to_scrape anymore!!!\n"*3)
+
+            sleep(60)
+
             cycle += 1
     finally:
         quit_all_drivers(drivers)

@@ -43,6 +43,6 @@ def get_all_quote_urls(driver, url):
         print("no new found in 100 cycles. Ending")
         print("found urls: " + str(len(urls)))
         return list(urls), total_quotes_counter
-    except Exception as e:
+    except:
         print("failed to get quotes for : " + url)
         return -1, -1
