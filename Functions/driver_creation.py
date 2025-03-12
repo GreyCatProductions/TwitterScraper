@@ -33,15 +33,8 @@ def login_all_drivers(drivers):
         time.sleep(1)
         scroll(driver, 500)
 
-        # Wait for the page to load and locate the login button
-        login_button = WebDriverWait(driver, 300).until(
-            EC.element_to_be_clickable((By.XPATH, "//span[text()='Anmelden']"))
-        )
-        time.sleep(1)
-        login_button.click()
-
         # Locate and interact with email/username field
-        email_text = WebDriverWait(driver, 300).until(
+        email_text = WebDriverWait(driver, 10).until(
             EC.presence_of_element_located(
                 (By.XPATH, "//span[text()='Telefonnummer, E-Mail-Adresse oder Nutzername']"))
         )
@@ -51,7 +44,7 @@ def login_all_drivers(drivers):
         driver.switch_to.active_element.send_keys(username)
 
         # Click "Weiter" to proceed
-        next_button = WebDriverWait(driver, 300).until(
+        next_button = WebDriverWait(driver, 5).until(
             EC.element_to_be_clickable((By.XPATH, "//span[text()='Weiter']/ancestor::*[2]"))
         )
         next_button.click()
@@ -75,7 +68,7 @@ def login_all_drivers(drivers):
         driver.switch_to.active_element.send_keys(password)
 
         time.sleep(1)
-        final_login_button = WebDriverWait(driver, 300).until(
+        final_login_button = WebDriverWait(driver, 5).until(
             EC.element_to_be_clickable((By.XPATH, "(//span[text()='Anmelden'])/ancestor::*[3]"))
         )
         final_login_button.click()
