@@ -1,7 +1,7 @@
-from reply_scrape import *
-from Helpers.saver import *
-from quote_scrape import *
-from user_scrape import *
+from Functions.reply_scrape import *
+from Functions.Helpers.saver import *
+from Functions.quote_scrape import *
+from Functions.user_scrape import *
 
 #region logging
 logging.basicConfig(

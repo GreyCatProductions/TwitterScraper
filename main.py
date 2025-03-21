@@ -1,4 +1,4 @@
-from main_helper import main
+from Functions.main_helper import main
 
 if __name__ == '__main__':
     hour_cycles_to_do = 24

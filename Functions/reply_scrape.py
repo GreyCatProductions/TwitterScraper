@@ -2,7 +2,6 @@ import logging
 import traceback
 from selenium.common import TimeoutException, NoSuchElementException
 from selenium.webdriver.firefox.webdriver import WebDriver
-
 from Functions.Helpers.common_scrape_functions import *
 from Functions.Helpers.saver import *
 from Functions.Helpers.extractor import *

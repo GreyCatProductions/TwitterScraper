@@ -1,7 +1,7 @@
 import queue
 from time import sleep
 from Functions.main_scrape_function import scrape
-from driver_creation import *
+from Functions.driver_creation import *
 
 def scraper_task(driver, url_queue, cycle, detailed_folders):
     while not url_queue.empty():

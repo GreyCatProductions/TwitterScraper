@@ -3,10 +3,14 @@ Input is a tweet.
 Output is a .csv with all replies, replies of replies etc.; quotes, their replies etc.; all users and some of their public profile data
 
 How to use:
-0. enter 3 registered usernames and passwords in provided format.
-1. enter the tweets you want to scrape into urls_to_scrape.txt. Do not change them in any way. Each url must be on a new line. Issues might occur if you enter more urls than the scraper can handle in one cycle. Maximum 2 urls in the list should always work if 1 cycle is one hour. 
-2. Start main.py
-3. enjoy
+1. In main.py change the parameters as you wish them to be. 
+2. Fill login_data with as much username-login pairs as you selected in main.py. The default is 3
+3. Copy paste the urls of the tweets you want scraped into urls_to_scrape.txt
+4. Start main.py
+5. You can add new urls to urls_to_scrape.txt between the cycles. 
 
 Important:
-- do not touch the windows until the login is done (should work in headless)
+- If not headless:
+  - Keep the windows at full size to prevent weird format bugs and bad screenshot formats
+  - Do not touch the windows at all until the login is done
+  - If you see the cat image it means the driver is idle
